@@ -1,0 +1,86 @@
+# TrueBit
+
+**Catch fake lossless and fake 320 kbps audio from your terminal.**
+
+A file sold or shared as "FLAC" or "320 kbps" is often just a 128 kbps MP3 converted upwards. TrueBit finds the fingerprint every MP3/AAC encoder leaves, a sharp **frequency cliff**, and tells you what the file really is.
+
+```powershell
+irm https://raw.githubusercontent.com/stackvs18/truebit/main/install.ps1 | iex
+truebit check "song.flac"
+truebit scan "D:\Music" --json report.json
+```
+
+![truebit check](docs/check.png)
+
+---
+
+## How it works
+
+1. **Read the file** with `ffprobe`: codec, container, bitrate, sample rate, bit depth.
+2. **Decode** it with `ffmpeg` into raw samples (numpy).
+3. **Spectrum:** Welch's method (FFT of many short overlapping pieces, averaged) gives the energy at every frequency.
+4. **Find the cliff:** average level in 250 Hz bands from 14 kHz up. The cliff is the biggest drop between neighbouring bands, if it's at least 20 dB and everything above stays quiet.
+5. **Verdict:** a lossless container with a cliff = **fake lossless**; an MP3 claiming far more bitrate than its cliff allows = **fake bitrate**.
+
+| Cliff at | Likely source |
+|---|---|
+| below 17.25 kHz | ~128 kbps |
+| 17.25 – 18.8 kHz | ~160–192 kbps |
+| 18.8 – 19.8 kHz | ~256 kbps / V0 |
+| 19.8 – 20.8 kHz | ~320 kbps |
+| no cliff | consistent with real lossless |
+
+These are estimates (encoders differ slightly), calibrated on files made with LAME through FFmpeg.
+
+It also reports **loudness**: EBU R128 integrated loudness (LUFS), true peak, crest factor and clipped samples. It saves `song.truebit.json` and a spectrogram picture (`song.spectrogram.png`) next to the file.
+
+**Try it on a fake you make yourself:**
+```powershell
+ffmpeg -i song.flac -b:a 128k small.mp3
+ffmpeg -i small.mp3 fake.flac
+truebit check fake.flac          # FAKE LOSSLESS: upscaled from ~128 kbps
+```
+
+---
+
+## Commands
+
+| Command | What it does |
+|---|---|
+| `truebit check FILE` | Full report: verdict, details, loudness, band chart; saves JSON and a spectrogram |
+| `truebit check FILE --no-spectrogram` | Same, without the picture |
+| `truebit scan FOLDER` | Table of every audio file in a folder (and sub-folders) |
+| `truebit scan FOLDER --json report.json` | Also saves all reports |
+
+Supported: FLAC, WAV, MP3, M4A/AAC, OGG, Opus, ALAC, AIFF, WMA (anything FFmpeg reads).
+
+---
+
+## Project structure
+
+```
+src/truebit/
+  probe.py      ffprobe file details + ffmpeg decoding
+  spectrum.py   Welch spectrum, band levels, find_cutoff()
+  verdict.py    cutoff -> likely source -> verdict
+  loudness.py   EBU R128 (ffmpeg ebur128), peak, RMS, crest factor, clipping
+  report.py     runs everything, saves JSON and spectrogram
+  cli.py        typer + rich: spinner words, verdict panel, band chart, scan table
+tests/          makes real test audio with FFmpeg and checks every verdict (7 tests)
+install.ps1     one-line Windows installer (FFmpeg + uv + TrueBit)
+```
+
+## Develop
+
+```powershell
+git clone https://github.com/stackvs18/truebit
+cd truebit
+uv sync
+uv run truebit check some_song.flac
+uv run pytest
+```
+
+## Next steps
+
+- A FastAPI service (`POST /analyze`) with a per-IP daily quota and Docker.
+- A machine-learning classifier: encode real lossless clips at 128/192/256/320 kbps (free labels), train on band energies, and report a confidence next to the rule-based verdict.
