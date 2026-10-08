@@ -31,3 +31,21 @@ def test_a_pasted_file_is_checked_and_a_folder_is_scanned(tmp_path):
 def test_unknown_words_are_rejected():
     assert to_command_words(["dance"]) is None
     assert to_command_words([]) is None
+
+
+# Regression: with output going to a pipe or a file, Windows used an old encoding without
+# ◆ or █ and TrueBit crashed. Run a real command with its output piped and check it works.
+def test_output_to_a_pipe_does_not_crash(tmp_path):
+    import os
+    import subprocess
+    import sys
+
+    environment = dict(os.environ)
+    environment.pop("PYTHONIOENCODING", None)
+    environment.pop("PYTHONUTF8", None)
+    result = subprocess.run(
+        [sys.executable, "-c", "from truebit.cli import app; app()", "scan", str(tmp_path)],
+        capture_output=True, env=environment, timeout=60,
+    )
+    assert result.returncode == 0, result.stderr.decode("utf-8", "replace")
+    assert "◆" in result.stdout.decode("utf-8")

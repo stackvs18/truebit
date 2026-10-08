@@ -10,6 +10,7 @@
 
 import math
 import random
+import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
 
@@ -41,6 +42,12 @@ VERBS = [
 # The TRUEBIT logo, drawn with block characters (two rows)
 LOGO_TOP = "▀█▀ █▀█ █ █ █▀▀ █▄▄ █ ▀█▀"
 LOGO_BOTTOM = " █  █▀▄ █▄█ ██▄ █▄█ █  █ "
+
+# When the output goes to a file or a pipe (truebit scan D:\Music > report.txt), Windows uses an
+# old text encoding that has no ◆ or █ and would crash. Always write UTF-8 instead.
+for stream in (sys.stdout, sys.stderr):
+    if stream is not None and hasattr(stream, "reconfigure"):
+        stream.reconfigure(encoding="utf-8", errors="replace")
 
 console = Console(highlight=False)
 

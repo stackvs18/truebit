@@ -12,7 +12,7 @@
     main { max-width: 720px; margin: 0 auto; padding: 80px 24px; text-align: center; }
     h1 { font-size: 52px; letter-spacing: -0.05em; line-height: 1.02; margin: 0 0 14px; font-weight: 600; }
     p.sub { color: var(--muted); font-size: 17px; margin: 0 0 36px; }
-    .drop { background: #fff; border: 1.5px dashed rgba(0,0,0,.18); border-radius: 22px; padding: 44px 24px; cursor: pointer; transition: border-color .2s; }
+    .drop { display: block; background: #fff; border: 1.5px dashed rgba(0,0,0,.18); border-radius: 22px; padding: 44px 24px; cursor: pointer; transition: border-color .2s; }
     .drop:hover, .drop.over { border-color: #1d1d1f; }
     .drop strong { display: block; font-size: 17px; margin-bottom: 6px; }
     .drop span { color: var(--muted); font-size: 14px; }
@@ -31,7 +31,7 @@
     .install .label { display: block; color: var(--muted); font-size: 13px; margin-bottom: 8px; }
     .install .command { display: flex; align-items: center; gap: 12px; background: #1d1d1f; color: #f5f5f7;
                         border-radius: 14px; padding: 14px 14px 14px 18px; }
-    .install code { flex: 1; font-family: "Geist Mono", ui-monospace, monospace; font-size: 13px;
+    .install code { flex: 1; min-width: 0; font-family: "Geist Mono", ui-monospace, monospace; font-size: 13px;
                     overflow-x: auto; white-space: nowrap; }
     .install code .prompt { color: #0A84FF; }
     .install button { font: inherit; font-size: 13px; border: 0; border-radius: 9px; padding: 7px 12px;
@@ -46,6 +46,11 @@
       animation: shimmer 1.6s linear infinite;
     }
     .thinking .meta { color: #8a8a8a; }
+    /* Phones: smaller heading, less padding */
+    @media (max-width: 520px) {
+      main { padding: 48px 16px; }
+      h1 { font-size: 38px; }
+    }
     @keyframes shimmer { from { background-position: 100% 0; } to { background-position: 0% 0; } }
   </style>
 </head>

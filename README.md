@@ -16,6 +16,21 @@ truebit normalize "song.flac"             # -14 LUFS, like Spotify
 
 ![truebit check](docs/check.png)
 
+## Install
+
+Paste one line into **PowerShell** (Windows 10/11):
+
+```powershell
+irm https://raw.githubusercontent.com/stackvs18/truebit/main/install.ps1 | iex
+```
+
+It installs FFmpeg (with winget) and [uv](https://docs.astral.sh/uv/) if you don't have them, then
+TrueBit itself, and puts `truebit` on your PATH. Running it again updates TrueBit.
+Remove it with `uv tool uninstall truebit`. Once the web app is live, its short link does the same:
+`irm https://<your-site>/install.ps1 | iex`.
+
+macOS / Linux: install FFmpeg and uv, then `uv tool install git+https://github.com/stackvs18/truebit`.
+
 ---
 
 ## How it works
@@ -105,11 +120,15 @@ truebit serve                      # http://127.0.0.1:8000  (upload page)  ·  /
 | `GET /` | Drag-and-drop upload page |
 | `POST /analyze` | Upload a file (max 50 MB), get the full JSON report; `?spectrogram=true` adds the picture as base64 |
 | `GET /health` | Status |
+| `GET /install.ps1` | Short install link: redirects to `install.ps1` on GitHub, so `irm https://<your-site>/install.ps1 \| iex` works |
 
 - **5 analyses per IP per day**, resetting at midnight India time (SQLite table `usage(ip, day, count)`). Over the limit: `429` with `Retry-After` (seconds until midnight). Remaining uses are in the `X-Quota-Remaining` header.
 - Behind a proxy (Render), the real IP is the first entry of `X-Forwarded-For`.
 - Uploads are written to a temp folder, analysed and deleted immediately. A broken or non-audio file doesn't use up a turn.
-- **Docker:** `docker build -t truebit . && docker run -p 8000:8000 truebit` (the image includes FFmpeg). On Render: New → Web Service → Docker.
+- **Docker:** `docker build -t truebit . && docker run -p 8000:8000 truebit` (the image includes FFmpeg).
+- **Deploy on Render (free):** New → **Blueprint** → this repo. [`render.yaml`](render.yaml) builds the
+  Dockerfile in Singapore and checks `/health`. The free plan sleeps after 15 idle minutes (the first
+  visit then takes about a minute), and the daily-limit counts reset when it restarts.
 
 ## Project structure
 
@@ -129,9 +148,10 @@ src/truebit/
   normalize.py  two-pass EBU R128 loudness normalization
   compare.py    which copy is genuinely better
   output.py     shared: output file names, running FFmpeg filters
-tests/          real test audio made with FFmpeg: verdicts, tools, API, quota, interactive mode (28 tests)
+tests/          real test audio made with FFmpeg: verdicts, tools, API, quota, interactive mode (30 tests)
 Dockerfile      Python + FFmpeg image for hosting the API
-install.ps1     one-line Windows installer (FFmpeg + uv + TrueBit)
+render.yaml     one-click Render deploy of that image
+install.ps1     one-line Windows installer (FFmpeg + uv + TrueBit); re-run to update
 ```
 
 ## Develop
