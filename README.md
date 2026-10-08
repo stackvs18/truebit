@@ -1,20 +1,22 @@
 # TrueBit
 
-**Catch fake lossless and fake 320 kbps audio, then repair and normalize what you keep. From your terminal.**
-
-A file sold or shared as "FLAC" or "320 kbps" is often just a 128 kbps MP3 converted upwards. TrueBit finds the fingerprint every MP3/AAC encoder leaves, a sharp **frequency cliff**, and tells you what the file really is.
+**Is your FLAC really lossless?** TrueBit catches fake lossless and fake 320 kbps audio by finding the frequency "cliff" every MP3 encoder leaves behind, then **repairs**, **normalizes** and **compares** what you keep. It's an interactive terminal app, and also a web API.
 
 ```powershell
 irm https://raw.githubusercontent.com/stackvs18/truebit/main/install.ps1 | iex
-truebit                                   # opens TrueBit: type commands or drag in a file
-truebit check "song.flac"                 # real or fake?
-truebit scan "D:\Music" --json report.json
-truebit compare "a.flac" "b.mp3"          # which copy is genuinely better?
-truebit repair "old_recording.wav"        # fix clipping, clicks and hiss
-truebit normalize "song.flac"             # -14 LUFS, like Spotify
 ```
 
 ![truebit check](docs/check.png)
+
+---
+
+## Why
+
+Music sold or shared as **"FLAC"** or **"320 kbps"** is often a **128 kbps MP3 converted upwards**. The file gets bigger and the label says "lossless", but the sound the MP3 threw away is gone for good.
+
+You can't tell from the file name, the size or the bitrate on the label. A fake FLAC made from a 128 kbps MP3 even shows a *higher* bitrate (1131 kbps) than a real one (890 kbps). Desktop tools exist (Spek, Fakin' The Funk), but they're GUIs. TrueBit is one command in the terminal, scans whole libraries, fixes damaged audio, and runs as an API too.
+
+---
 
 ## Install
 
@@ -24,36 +26,104 @@ Paste one line into **PowerShell** (Windows 10/11):
 irm https://raw.githubusercontent.com/stackvs18/truebit/main/install.ps1 | iex
 ```
 
-It installs FFmpeg (with winget) and [uv](https://docs.astral.sh/uv/) if you don't have them, then
-TrueBit itself, and puts `truebit` on your PATH. Running it again updates TrueBit.
-Remove it with `uv tool uninstall truebit`. Once the web app is live, its short link does the same:
-`irm https://<your-site>/install.ps1 | iex`.
+```mermaid
+flowchart LR
+    I["irm … | iex"] --> F{FFmpeg?}
+    F -->|missing| FW[winget install Gyan.FFmpeg]
+    F -->|found| U{uv?}
+    FW --> U
+    U -->|missing| UI[install uv from astral.sh]
+    U -->|found| T[uv tool install --upgrade<br/>git+https://github.com/stackvs18/truebit]
+    UI --> T
+    T --> P[truebit.exe on your PATH]
+```
 
-macOS / Linux: install FFmpeg and uv, then `uv tool install git+https://github.com/stackvs18/truebit`.
+- It installs FFmpeg (with winget) and [uv](https://docs.astral.sh/uv/) if you don't have them, then TrueBit itself, in its own isolated folder with its own Python.
+- **Running it again updates TrueBit.** Remove it with `uv tool uninstall truebit`.
+- It runs inside a function, so it leaves your PowerShell session as it found it. As with any `irm | iex`, [read the script](install.ps1) first.
+- Once the web app is hosted, its short link does the same: `irm https://<your-site>/install.ps1 | iex`.
+- macOS / Linux: install FFmpeg and uv, then `uv tool install git+https://github.com/stackvs18/truebit`.
 
 ---
 
-## How it works
+## Use it
 
-1. **Read the file** with `ffprobe`: codec, container, bitrate, sample rate, bit depth.
-2. **Decode** it with `ffmpeg` into raw samples (numpy).
-3. **Spectrum:** Welch's method (FFT of many short overlapping pieces, averaged) gives the energy at every frequency.
-4. **Find the cliff:** average level in 250 Hz bands from 14 kHz up. The cliff is the biggest drop between neighbouring bands, if it's at least 20 dB and everything above stays quiet.
-5. **Verdict:** a lossless container with a cliff = **fake lossless**; an MP3 claiming far more bitrate than its cliff allows = **fake bitrate**.
+Type `truebit` and it opens like an app: the TRUEBIT logo, then a `truebit ›` prompt that stays open until `exit`. Type any command, or drag a file (checked) or a folder (scanned) into the window and press Enter.
 
-| Cliff at | Likely source |
+```
+  ▀█▀ █▀█ █ █ █▀▀ █▄▄ █ ▀█▀
+   █  █▀▄ █▄█ ██▄ █▄█ █  █
+  v0.1.0 · is your FLAC really lossless?
+
+truebit › check fake_from_128.flac --save
+◆ Check  fake_from_128.flac
+▅▇▃▂ Sniffing for brickwalls… (1s · 1.1 MB · ctrl+c to stop)
+▂▄▆█ Done in 1s
+╰─ FAKE LOSSLESS: upscaled from ~128 kbps
+   This FLAC file has a sharp cutoff at 16.8 kHz ...
+   16.0–17.0 kHz  ██████████ -96 dB  ← cliff
+◆ Saved  truebit-reports/fake_from_128.truebit.json
+truebit › exit
+```
+
+Every command also works directly:
+
+| Command | What it does |
 |---|---|
-| below 17.25 kHz | ~128 kbps |
-| 17.25 – 18.8 kHz | ~160–192 kbps |
-| 18.8 – 19.8 kHz | ~256 kbps / V0 |
-| 19.8 – 20.8 kHz | ~320 kbps |
-| no cliff | consistent with real lossless |
+| `truebit` | Opens interactive mode (`help`, `clear`, `exit`) |
+| `truebit check FILE` | **Real or fake?** Verdict, file details, loudness, and a band chart showing the cliff |
+| `truebit check FILE --save` | Also saves a JSON report and a spectrogram to `./truebit-reports/` (never next to your music) |
+| `truebit scan FOLDER` | Checks every audio file in a folder and its sub-folders; `--json report.json` saves everything |
+| `truebit compare A B` | **Which copy is genuinely better**, judged by what's really in the files, not the label |
+| `truebit repair FILE` | Rebuilds clipped peaks, removes clicks, reduces hiss; shows before/after numbers. `--strength light/medium/strong`, `--no-declick`, `--no-denoise`… |
+| `truebit normalize FILE` | Sets loudness to **−14 LUFS** like Spotify/YouTube; `--preset apple` (−16), `broadcast` (−23), or `--target -12` |
+| `truebit serve` | Web upload page and JSON API |
+| `truebit version` | The installed version |
 
-These are estimates (encoders differ slightly), calibrated on files made with LAME through FFmpeg.
+Verdicts: **GENUINE LOSSLESS** · **FAKE LOSSLESS: upscaled from ~128 kbps** · **FAKE 320 kbps: really ~128 kbps** · **This is a lossy file**.
+Supported: FLAC, WAV, MP3, M4A/AAC, OGG, Opus, ALAC, AIFF, WMA (anything FFmpeg reads).
 
-It also reports **loudness**: EBU R128 integrated loudness (LUFS), true peak, crest factor and clipped samples (measured on every channel). With `--save` it writes `song.truebit.json` and a spectrogram picture into `./truebit-reports/`, never next to your music, so your library is never changed.
+While it works, an animated **equalizer** bounces in macOS blue next to a shimmering verb that changes every 2 seconds (*Sniffing for brickwalls, Interrogating the Nyquist, Bribing the FFT…*) and a live timer. The analysis runs in a background thread while `rich.live.Live` redraws the line 20 times a second.
+
+---
+
+## How detection works
+
+To save space, every MP3/AAC encoder removes high frequencies with a **low-pass filter**. A 128 kbps MP3 keeps nothing above about **16.75 kHz**; a 320 kbps MP3 keeps up to about **20 kHz**; real CD-quality audio has sound up to **22 kHz**. Converting the MP3 back to FLAC can't bring those frequencies back, so the "FLAC" has a sharp **cliff** in its spectrum.
+
+```mermaid
+flowchart LR
+    F[song.flac] --> PR["ffprobe<br/>codec, bitrate, sample rate"]
+    F --> DE["ffmpeg decode<br/>float samples, every channel"]
+    DE --> WE["Welch's method<br/>average FFT of many short pieces"]
+    WE --> BA["level of every 250 Hz band<br/>from 14 kHz up"]
+    BA --> CL{"biggest drop between bands<br/>≥ 20 dB and quiet above?"}
+    CL -->|yes| CUT["cliff at 16.75 kHz → ~128 kbps"]
+    CL -->|no| FULL["no cliff → full band"]
+    CUT & FULL & PR --> VE["verdict"]
+```
+
+1. **Probe:** `ffprobe` gives the codec, container, bitrate, sample rate, bit depth, channels and duration.
+2. **Decode:** `ffmpeg` pipes raw 32-bit float samples straight into NumPy (no temporary files).
+3. **Spectrum:** `scipy.signal.welch(nperseg=8192)` takes the FFT of many overlapping pieces and averages them into a clean energy-per-frequency curve.
+4. **Bands:** the average level of every 250 Hz band from 14 kHz to the top.
+5. **Cliff:** the biggest drop between a band and the band two steps above. It counts only if the drop is **≥ 20 dB** and everything above stays at least 20 dB quieter.
+6. **Likely source:**
+
+   | Cliff at | Likely original |
+   |---|---|
+   | below 17.25 kHz | ~128 kbps |
+   | 17.25–18.8 kHz | ~160–192 kbps |
+   | 18.8–19.8 kHz | ~256 kbps / V0 |
+   | 19.8–20.8 kHz | ~320 kbps |
+   | no cliff | consistent with real lossless |
+
+   Calibrated on files made with the LAME encoder through FFmpeg. These are estimates, and TrueBit says so.
+7. **Verdict:** a lossless container **with** a cliff → **fake lossless**; a lossy file claiming ≥ 1.4× the bitrate its cliff allows → **fake bitrate**; lossless with no cliff → **genuine lossless**; otherwise an honest lossy file.
+8. **Loudness:** FFmpeg's EBU R128 meter gives integrated loudness (LUFS), loudness range and true peak; NumPy gives sample peak, RMS, crest factor, clipped samples and the noise floor, measured on **every channel**.
 
 **Try it on a fake you make yourself:**
+
 ```powershell
 ffmpeg -i song.flac -b:a 128k small.mp3
 ffmpeg -i small.mp3 fake.flac
@@ -62,97 +132,183 @@ truebit check fake.flac          # FAKE LOSSLESS: upscaled from ~128 kbps
 
 ---
 
-## Commands
+## Repair, normalize and compare
 
-| Command | What it does |
-|---|---|
-| `truebit` | Opens TrueBit's interactive mode: a `truebit ›` prompt where you type commands or drag in a file/folder; `help`, `exit` |
-| `truebit check FILE` | Full report: verdict, details, loudness, band chart |
-| `truebit check FILE --save` | Also saves the JSON report and a spectrogram to `./truebit-reports/` |
-| `truebit scan FOLDER` | Table of every audio file in a folder (and sub-folders) |
-| `truebit scan FOLDER --json report.json` | Also saves all reports |
-| `truebit compare A B` | Which of two copies of a song is genuinely better (by real cutoff, not the label) |
-| `truebit repair FILE` | Rebuilds clipped peaks, removes clicks, reduces hiss; shows before/after numbers |
-| `truebit repair FILE --strength strong --no-declick` | Choose how hard to denoise and which steps to run |
-| `truebit normalize FILE` | Sets loudness to -14 LUFS (Spotify/YouTube); `--preset apple` (-16), `broadcast` (-23), or `--target -12` |
-| `truebit serve` | Web API and upload page |
+```mermaid
+flowchart LR
+    IN[old.wav] --> M1["measure: clipping,<br/>noise floor, true peak"]
+    M1 --> DC["adeclick<br/>fill in short spikes"]
+    DC --> DP["adeclip<br/>rebuild clipped wave tops"]
+    DP --> DN["afftdn<br/>reduce hiss at the<br/>measured noise floor"]
+    DN --> LI["alimiter<br/>don't clip again"]
+    LI --> OUT[old.repaired.wav] --> M2[measure again → before/after table]
+```
 
-Supported: FLAC, WAV, MP3, M4A/AAC, OGG, Opus, ALAC, AIFF, WMA (anything FFmpeg reads).
+**`repair`** chains FFmpeg's restoration filters. The noise floor is **measured first** and passed to the denoiser, so it removes hiss and not music: without that, noise went from −35.3 to only −35.7 dB; with it, to **−49.7 dB**. On dense, loud music with no quiet gaps, a "noise floor" above −30 dB is treated as music and a gentle default is used. Repair fixes damage. It can't bring back frequencies an MP3 encoder deleted (nothing can), and it says so.
+
+**`normalize`** runs EBU R128 `loudnorm` in two passes: measure, then apply **one exact gain change** with `linear=true` so the dynamics stay untouched. The original sample rate is kept, and the true peak is capped at −1 dBTP.
+
+**`compare`** ranks by what's really in the files: genuine lossless first (then higher sample rate and bit depth), then the **higher real cutoff**, then **fewer clipped samples**. It warns if the two lengths differ by more than 3 s (probably different recordings).
+
+Outputs are saved next to the input (`song.repaired.flac`, `song.normalized-14.flac`). Lossy inputs are saved as FLAC, so the fix adds no further loss.
 
 ---
 
-## Interactive mode and the look
+## Results
 
-Type `truebit` and it opens like an app (the way `claude` opens Claude Code): a TRUEBIT logo,
-then a `truebit ›` prompt that stays open until `exit`. Type any command, or just drag a file
-(checked) or a folder (scanned) into the window and press Enter.
+**On test files made with FFmpeg:**
 
-The look is TrueBit's own, in macOS blue: `◆` for each action, `╰─` for its result, and an
-animated **equalizer** (`▂▅▇▃`) while it works, with a shimmering verb that changes every 2 seconds
-and a live timer: `▅▇▃▂ Sniffing for brickwalls… (12s · 4.2 MB · ctrl+c to stop)`.
+| File | Label says | TrueBit says |
+|---|---|---|
+| `real.flac` | FLAC 890 kbps | ✅ **GENUINE LOSSLESS** (no cliff) |
+| `fake_from_128.flac` | FLAC **1131** kbps | ❌ **FAKE LOSSLESS: upscaled from ~128 kbps** (cliff 16.75 kHz, drop 89.5 dB) |
+| `fake_320.mp3` | MP3 320 kbps | ❌ **FAKE 320 kbps: really ~128 kbps** |
+| `mp3_320.mp3` | MP3 320 kbps | honest lossy (cliff 20.0 kHz) |
+| `mp3_128.mp3` | MP3 128 kbps | honest lossy (cliff 16.75 kHz) |
 
-## Repair, normalize and compare
+Repair (strong): 75,482 clipped samples → **0**, background noise −35.3 → **−49.7 dB**. Normalize: −48.75 → **−14.0 LUFS**. Compare: the real 890 kbps FLAC beats the 1131 kbps fake.
 
-**`repair`** chains FFmpeg's restoration filters:
-`adeclick` (fills in short spikes) → `adeclip` (rebuilds the tops of clipped waves) →
-`afftdn` (turns down steady hiss; TrueBit measures the noise floor first and tells the filter
-where the hiss sits) → `alimiter` (so repaired peaks don't clip again).
-On a test file: **75,482 clipped samples → 0, background noise −35.3 → −49.7 dB** (strong).
-It fixes damage. It cannot bring back frequencies an MP3 encoder deleted, and it says so.
+**On a real library of 36 songs (MP3 and AAC):**
 
-**`normalize`** runs EBU R128 `loudnorm` in two passes: measure first, then one exact gain change
-(`linear=true` keeps the dynamics). On a test file: −48.75 → −14.0 LUFS with true peak at −0.9 dBTP.
+| Feature | Result |
+|---|---|
+| Scan | 36 files in 30 s, **11 fakes**, e.g. "320 kbps" MP3s with a 16.0 kHz cliff (really ~128 kbps) |
+| Repair | A bass-boosted track: **1,626,790 clipped samples → 0**, true peak +4.8 → +1.8 dBTP |
+| Normalize | A master at **+0.78 LUFS** → exactly **−14 LUFS** |
+| Compare | Two copies with the same cutoff: kept the one with 168,866 clipped samples instead of 1,780,272 |
 
-**`compare`** ranks by what's really in the files: genuine lossless first, then the higher real
-cutoff, then fewer clipped samples. A "FLAC" at 1131 kbps loses to a real FLAC at 890 kbps.
+Real-world testing found three bugs, each now fixed with a regression test:
+1. **False clipping.** FFmpeg's stereo-to-mono downmix *adds* the channels, so a clean song peaking at 0.95 looked like it peaked at 1.29 (33,810 "clipped" samples). Now peaks and clipping are measured on every channel, and mono is made by averaging.
+2. **Loud masters crashed normalize.** `loudnorm` rejects a measured loudness above 0 LUFS, and one master measured +0.78. The measurements are now kept inside the filter's allowed ranges.
+3. **Piped output crashed on Windows** (found while testing the installer). `truebit scan D:\Music > report.txt` used Windows' old cp1252 encoding, which has no `◆` or `█`. Output is now always UTF-8.
 
-Outputs are saved next to the input (`song.repaired.flac`, `song.normalized-14.flac`). Lossy inputs
-are saved as FLAC, so the fix adds no further loss.
+---
 
 ## Web API
 
 ```powershell
-truebit serve                      # http://127.0.0.1:8000  (upload page)  ·  /docs for the API
+truebit serve          # http://127.0.0.1:8000  ·  API docs at /docs
 ```
 
-| Endpoint | What it does |
-|---|---|
-| `GET /` | Drag-and-drop upload page |
-| `POST /analyze` | Upload a file (max 50 MB), get the full JSON report; `?spectrogram=true` adds the picture as base64 |
-| `GET /health` | Status |
-| `GET /install.ps1` | Short install link: redirects to `install.ps1` on GitHub, so `irm https://<your-site>/install.ps1 \| iex` works |
+| Method | Endpoint | Returns |
+|---|---|---|
+| GET | `/` | Drag-and-drop upload page, with the one-line install command and a Copy button |
+| POST | `/analyze` | Upload a file (max 50 MB), get the full JSON report; `?spectrogram=true` adds the picture as base64 |
+| GET | `/health` | `{"status": "ok", "version": "0.1.0"}` |
+| GET | `/install.ps1` | The short install link: redirects to [`install.ps1`](install.ps1) on GitHub, so `irm https://<your-site>/install.ps1 \| iex` works |
 
-- **5 analyses per IP per day**, resetting at midnight India time (SQLite table `usage(ip, day, count)`). Over the limit: `429` with `Retry-After` (seconds until midnight). Remaining uses are in the `X-Quota-Remaining` header.
-- Behind a proxy (Render), the real IP is the first entry of `X-Forwarded-For`.
-- Uploads are written to a temp folder, analysed and deleted immediately. A broken or non-audio file doesn't use up a turn.
-- **Docker:** `docker build -t truebit . && docker run -p 8000:8000 truebit` (the image includes FFmpeg).
-- **Deploy on Render (free):** New → **Blueprint** → this repo. [`render.yaml`](render.yaml) builds the
-  Dockerfile in Singapore and checks `/health`. The free plan sleeps after 15 idle minutes (the first
-  visit then takes about a minute), and the daily-limit counts reset when it restarts.
+```mermaid
+sequenceDiagram
+    participant B as Browser
+    participant A as FastAPI
+    participant Q as quota (SQLite)
+    participant E as TrueBit engine
+    B->>A: POST /analyze (file)
+    A->>Q: take one for this IP today
+    alt over 5 today
+        Q-->>A: no
+        A-->>B: 429 + Retry-After (seconds to midnight IST)
+    else allowed
+        A->>A: save to a temp folder (stop at 50 MB → 413)
+        A->>E: analyze_file()
+        E-->>A: report
+        A->>A: delete the temp folder
+        A-->>B: 200 report + X-Quota-Remaining
+    end
+```
+
+- **5 analyses per IP per day**, reset at midnight India time (SQLite table `usage(ip, day, count)`).
+- Non-audio files get **400** and broken audio gets **422**; neither uses up a turn.
+- Uploads are deleted right after analysis.
+
+<details>
+<summary><b>The JSON report</b> (for <code>fake_from_128.flac</code>, band list shortened)</summary>
+
+```json
+{
+  "verdict": "fake_lossless",
+  "verdict_headline": "FAKE LOSSLESS: upscaled from ~128 kbps",
+  "verdict_detail": "This FLAC file has a sharp cutoff at 16.8 kHz ...",
+  "file": {"container": "flac", "codec": "flac", "lossy_codec": false, "bitrate_kbps": 1131,
+           "sample_rate_hz": 44100, "bit_depth": 24, "channels": 2, "duration_seconds": 8.0},
+  "loudness": {"integrated_lufs": -25.9, "loudness_range_lu": 0.1, "true_peak_dbtp": -15.3,
+               "sample_peak_dbfs": -12.4, "rms_dbfs": -25.3, "crest_factor_db": 12.9,
+               "noise_floor_dbfs": -26.8, "clipped_samples": 0},
+  "spectrum": {"cutoff_hz": 16750, "cutoff_drop_db": 89.5, "nyquist_hz": 22050,
+               "rolloff_median_hz": 4834,
+               "bands": [{"from_hz": 16000, "to_hz": 17000, "level_db": -93.0}, "..."]}
+}
+```
+
+</details>
+
+### Hosting it (Render, free)
+
+New → **Blueprint** → this repo. [`render.yaml`](render.yaml) builds the [`Dockerfile`](Dockerfile) (Python 3.12 + FFmpeg) in Singapore and checks `/health`. The free plan sleeps after 15 idle minutes (the next visit takes about a minute to wake it), and the daily-limit counts reset when it restarts.
+
+Locally with Docker: `docker build -t truebit . && docker run -p 8000:8000 truebit`.
+
+---
+
+## Architecture
+
+```mermaid
+flowchart LR
+    U1[Terminal: truebit check / scan / compare] --> R[report.analyze_file]
+    U2[Browser: upload page] --> API[FastAPI /analyze] --> Q{quota.py<br/>5 per IP per day}
+    Q -->|allowed| R
+    Q -->|over limit| E429[429 + Retry-After]
+    R --> P[probe.py<br/>ffprobe + ffmpeg decode]
+    R --> S[spectrum.py<br/>Welch + find_cutoff]
+    R --> L[loudness.py<br/>ebur128 + NumPy]
+    S --> V[verdict.py]
+    R --> J[(truebit-reports/<br/>JSON + spectrogram)]
+    U3[truebit repair] --> RP[repair.py<br/>adeclick, adeclip, afftdn, alimiter]
+    U4[truebit normalize] --> N[normalize.py<br/>loudnorm, two passes]
+    U5[truebit compare] --> C[compare.py] --> R
+```
+
+| Layer | Tool | Why |
+|---|---|---|
+| Language | **Python 3.11+** | Great for numbers, CLIs and APIs |
+| Audio in/out | **FFmpeg / ffprobe** | Reads every format; professional filters (`ebur128`, `loudnorm`, `adeclip`, `adeclick`, `afftdn`, `showspectrumpic`) |
+| Maths | **NumPy**, **SciPy** (`signal.welch`) | Fast sample arrays; Welch's method for a clean, averaged spectrum |
+| CLI | **Typer** | Commands and options from plain Python functions |
+| Terminal UI | **Rich** | Colours, tables, the live animated spinner |
+| Web API | **FastAPI** + Uvicorn | File uploads, automatic `/docs` |
+| Quota | **SQLite** | A tiny `usage(ip, day, count)` table, no server needed |
+| Packaging | **uv** + `pyproject.toml` | `uv tool install` puts `truebit` on your PATH; `install.ps1` does it in one line |
+| Hosting | **Docker** + Render | Python and FFmpeg in one image |
+
+---
 
 ## Project structure
 
 ```
 src/truebit/
-  probe.py      ffprobe file details + ffmpeg decoding
-  spectrum.py   Welch spectrum, band levels, find_cutoff()
-  verdict.py    cutoff -> likely source -> verdict
-  loudness.py   EBU R128 (ffmpeg ebur128), peak, RMS, crest factor, clipping
-  report.py     runs everything, saves JSON and spectrogram
   cli.py        every command (Typer)
-  shell.py      interactive mode: the truebit › prompt, pasted paths
-  ui.py         the look: macOS blue, equalizer spinner, logo
-  api.py        FastAPI: upload page, /analyze, /health
-  quota.py      5 analyses per IP per day (SQLite)
-  repair.py     declick, declip, denoise, limiter
+  shell.py      interactive mode: the truebit › prompt, dragged-in paths
+  ui.py         the look: macOS blue, ◆ / ╰─ lines, equalizer spinner, logo
+  probe.py      ffprobe file details + ffmpeg decoding to NumPy
+  spectrum.py   Welch spectrum, 250 Hz bands, find_cutoff()
+  verdict.py    cutoff → likely source → verdict
+  loudness.py   EBU R128 loudness, true peak, RMS, crest factor, clipping, noise floor
+  report.py     runs every check, saves JSON + spectrogram, finds audio files
+  repair.py     declick → declip → denoise → limiter
   normalize.py  two-pass EBU R128 loudness normalization
   compare.py    which copy is genuinely better
   output.py     shared: output file names, running FFmpeg filters
-tests/          real test audio made with FFmpeg: verdicts, tools, API, quota, interactive mode (30 tests)
-Dockerfile      Python + FFmpeg image for hosting the API
+  api.py        FastAPI: upload page, /analyze, /health, /install.ps1
+  quota.py      5 analyses per IP per day (SQLite)
+  upload.html   the upload page, with the same equalizer spinner
+tests/          real test audio made with FFmpeg (30 tests)
+scripts/        make_screenshot.py: records the terminal output as docs/check.png
+install.ps1     one-line Windows installer; re-run to update
+Dockerfile      Python + FFmpeg image for the web API
 render.yaml     one-click Render deploy of that image
-install.ps1     one-line Windows installer (FFmpeg + uv + TrueBit); re-run to update
 ```
+
+---
 
 ## Develop
 
@@ -161,26 +317,42 @@ git clone https://github.com/stackvs18/truebit
 cd truebit
 uv sync
 uv run truebit check some_song.flac
-uv run pytest
+uv run pytest                    # 30 tests, about 6 seconds
 
-# Make `truebit` a real command (editable: code changes apply instantly)
-uv tool install --editable .
+# Make `truebit` a real command that uses this folder (code changes apply instantly)
+uv tool install --editable . --force
 ```
 
-## Tested on a real library
+The tests generate real audio with FFmpeg (pink noise, MP3 encodes, fakes, clipped tone bursts with hiss) and check the verdicts, the cutoff finder, repair numbers, normalize accuracy (±1 LUFS), compare, interactive-mode parsing, piped output, the three real-music bugs and every API status code.
 
-On 36 real songs (MP3 and AAC): **scan took 30 s and found 11 fakes**, for example a "320 kbps" MP3
-with a 16.0 kHz cliff (really ~128 kbps). **Repair** took a heavily clipped track from
-**1,626,790 clipped samples to 0** (true peak +4.8 → +1.8 dBTP); **normalize** took a +0.78 LUFS
-master to exactly **−14 LUFS**.
+---
 
-Two bugs were found this way and fixed, each with a regression test:
-1. Clipping was measured on a mono mix made by FFmpeg, which *adds* the channels, so a clean file
-   peaking at 0.95 looked like it peaked at 1.29. Now peaks and clipping are measured on every
-   channel, and mono is made by averaging.
-2. FFmpeg's `loudnorm` rejects a measured loudness above 0 LUFS; very loud masters measure +0.78.
-   The measurements are now kept inside the filter's allowed ranges.
+## Known limits and next steps
 
-## Next steps
+**Limits**
+- Cutoff → bitrate is an estimate calibrated on LAME; other encoders differ slightly.
+- Very quiet or naturally band-limited recordings (old tapes) can look like a cliff.
+- `check` and `scan` decode only the first 120 s of each file for the spectrum, peaks and clipping (plenty for the cutoff, and fast); LUFS and true peak cover the whole file.
+- The web quota is per IP, so people on the same Wi-Fi share it.
+- Repair can't restore frequencies an encoder deleted. Nothing can.
 
-- A machine-learning classifier: encode real lossless clips at 128/192/256/320 kbps (free labels), train on band energies, and report a confidence next to the rule-based verdict.
+**Next steps**
+1. A machine-learning classifier: encode lossless clips at 128/192/256/320 kbps (free labels), train on band energies, and report a confidence next to the rule-based verdict.
+2. `truebit dupes`: find duplicate songs in a library and keep the best copy.
+3. An HTML report for a whole-library scan.
+4. Batch repair and normalize for folders.
+
+---
+
+## Glossary
+
+| Term | Meaning |
+|---|---|
+| **Lossless / lossy** | Keeps every bit (FLAC, ALAC, WAV) / throws sound away to save space (MP3, AAC, Opus) |
+| **Low-pass filter** | Removes frequencies above a limit; MP3 encoders use one, which leaves the cliff |
+| **FFT / Welch's method** | Sound → energy per frequency / averaging many FFTs for a clean spectrum |
+| **Nyquist frequency** | Half the sample rate: the highest frequency a file can hold (22.05 kHz at 44.1 kHz) |
+| **LUFS** | How loud audio sounds to people (EBU R128); Spotify plays at about −14 |
+| **True peak (dBTP)** | The highest level including between samples; above 0 can distort |
+| **Clipping** | Samples stuck at full level: the tops of the waves are cut off |
+| **Noise floor** | The level of the background hiss |
