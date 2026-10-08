@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>TrueBit · Is your FLAC really lossless?</title>
+  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono&display=swap" rel="stylesheet">
+  <style>
+    :root { --page: #f5f5f7; --text: #1d1d1f; --muted: rgba(0,0,0,.56); --line: rgba(0,0,0,.08); }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--page); color: var(--text); font-family: "Geist", -apple-system, sans-serif; letter-spacing: -0.01em; }
+    main { max-width: 720px; margin: 0 auto; padding: 80px 24px; text-align: center; }
+    h1 { font-size: 52px; letter-spacing: -0.05em; line-height: 1.02; margin: 0 0 14px; font-weight: 600; }
+    p.sub { color: var(--muted); font-size: 17px; margin: 0 0 36px; }
+    .drop { background: #fff; border: 1.5px dashed rgba(0,0,0,.18); border-radius: 22px; padding: 44px 24px; cursor: pointer; transition: border-color .2s; }
+    .drop:hover, .drop.over { border-color: #1d1d1f; }
+    .drop strong { display: block; font-size: 17px; margin-bottom: 6px; }
+    .drop span { color: var(--muted); font-size: 14px; }
+    .result { text-align: left; background: #fff; border: 1px solid var(--line); border-radius: 22px; padding: 24px; margin-top: 20px; }
+    .verdict { font-size: 22px; font-weight: 600; letter-spacing: -0.03em; margin: 0 0 8px; }
+    .fake { color: #d93025; } .real { color: #14a800; } .lossy { color: #b26a00; }
+    .detail { color: var(--muted); margin: 0 0 16px; }
+    table { width: 100%; border-collapse: collapse; font-size: 14px; }
+    td { padding: 7px 0; border-top: 1px solid var(--line); }
+    td:first-child { color: var(--muted); width: 38%; }
+    img { width: 100%; border-radius: 12px; margin-top: 16px; }
+    .note { color: var(--muted); font-size: 13px; margin-top: 18px; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>Is your FLAC<br>really lossless?</h1>
+  <p class="sub">Drop an audio file. TrueBit finds the frequency cliff that MP3 encoders leave behind.</p>
+
+  <label class="drop" id="drop">
+    <strong>Choose or drop an audio file</strong>
+    <span>FLAC, WAV, MP3, M4A, OGG · up to 50 MB · 5 checks per day · files are deleted right after</span>
+    <input type="file" id="file" accept="audio/*" hidden>
+  </label>
+
+  <div id="result"></div>
+  <p class="note">Or from the terminal: <code>irm https://raw.githubusercontent.com/stackvs18/truebit/main/install.ps1 | iex</code></p>
+</main>
+
+<script>
+  var drop = document.getElementById("drop");
+  var fileInput = document.getElementById("file");
+  var resultBox = document.getElementById("result");
+
+  // Puts text into HTML safely
+  function escapeText(text) {
+    var element = document.createElement("div");
+    element.textContent = String(text);
+    return element.innerHTML;
+  }
+
+  // Sends the file to /analyze and shows the answer
+  function analyze(file) {
+    resultBox.innerHTML = '<div class="result">Listening very carefully…</div>';
+    var formData = new FormData();
+    formData.append("file", file);
+
+    fetch("/analyze?spectrogram=true", { method: "POST", body: formData })
+      .then(function (response) {
+        return response.json().then(function (data) { return { ok: response.ok, data: data }; });
+      })
+      .then(function (answer) {
+        if (!answer.ok) {
+          resultBox.innerHTML = '<div class="result">' + escapeText(answer.data.detail || answer.data.error) + "</div>";
+          return;
+        }
+        var report = answer.data;
+        var colour = report.verdict.indexOf("fake") === 0 ? "fake" : (report.verdict === "lossless" ? "real" : "lossy");
+        var cutoff = report.spectrum.cutoff_hz ? (report.spectrum.cutoff_hz / 1000).toFixed(2) + " kHz" : "none (full band)";
+        var html = '<div class="result">'
+          + '<p class="verdict ' + colour + '">' + escapeText(report.verdict_headline) + "</p>"
+          + '<p class="detail">' + escapeText(report.verdict_detail) + "</p><table>"
+          + "<tr><td>Format</td><td>" + escapeText(report.file.codec.toUpperCase() + " · " + (report.file.bitrate_kbps || "?") + " kbps") + "</td></tr>"
+          + "<tr><td>Sample rate</td><td>" + escapeText(report.file.sample_rate_hz + " Hz") + "</td></tr>"
+          + "<tr><td>Cutoff</td><td>" + escapeText(cutoff) + "</td></tr>"
+          + "<tr><td>Loudness</td><td>" + escapeText(report.loudness.integrated_lufs + " LUFS · true peak " + report.loudness.true_peak_dbtp + " dBTP") + "</td></tr>"
+          + "</table>";
+        if (report.spectrogram_png_base64) {
+          html = html + '<img alt="Spectrogram" src="data:image/png;base64,' + report.spectrogram_png_base64 + '">';
+        }
+        resultBox.innerHTML = html + "</div>";
+      })
+      .catch(function () {
+        resultBox.innerHTML = '<div class="result">Something went wrong. Try again.</div>';
+      });
+  }
+
+  fileInput.addEventListener("change", function () {
+    if (fileInput.files.length > 0) { analyze(fileInput.files[0]); }
+  });
+  drop.addEventListener("dragover", function (event) { event.preventDefault(); drop.classList.add("over"); });
+  drop.addEventListener("dragleave", function () { drop.classList.remove("over"); });
+  drop.addEventListener("drop", function (event) {
+    event.preventDefault();
+    drop.classList.remove("over");
+    if (event.dataTransfer.files.length > 0) { analyze(event.dataTransfer.files[0]); }
+  });
+</script>
+</body>
+</html>

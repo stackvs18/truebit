@@ -158,6 +158,18 @@ def scan(folder: Path = typer.Argument(..., exists=True, file_okay=False, help="
 
 
 @app.command()
+def serve(host: str = typer.Option("127.0.0.1", help="Use 0.0.0.0 to allow other devices."),
+          port: int = typer.Option(8000)):
+    """Start the web API and upload page (5 analyses per IP per day)."""
+    import uvicorn
+
+    from truebit.api import create_app
+
+    console.print(f"TrueBit API on http://{host}:{port}  (docs: http://{host}:{port}/docs)")
+    uvicorn.run(create_app(), host=host, port=port, log_level="warning")
+
+
+@app.command()
 def version():
     """Show the version."""
     console.print("truebit " + __version__)

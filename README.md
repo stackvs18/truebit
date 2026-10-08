@@ -56,6 +56,23 @@ Supported: FLAC, WAV, MP3, M4A/AAC, OGG, Opus, ALAC, AIFF, WMA (anything FFmpeg 
 
 ---
 
+## Web API
+
+```powershell
+truebit serve                      # http://127.0.0.1:8000  (upload page)  ·  /docs for the API
+```
+
+| Endpoint | What it does |
+|---|---|
+| `GET /` | Drag-and-drop upload page |
+| `POST /analyze` | Upload a file (max 50 MB), get the full JSON report; `?spectrogram=true` adds the picture as base64 |
+| `GET /health` | Status |
+
+- **5 analyses per IP per day**, resetting at midnight India time (SQLite table `usage(ip, day, count)`). Over the limit: `429` with `Retry-After` (seconds until midnight). Remaining uses are in the `X-Quota-Remaining` header.
+- Behind a proxy (Render), the real IP is the first entry of `X-Forwarded-For`.
+- Uploads are written to a temp folder, analysed and deleted immediately. A broken or non-audio file doesn't use up a turn.
+- **Docker:** `docker build -t truebit . && docker run -p 8000:8000 truebit` (the image includes FFmpeg). On Render: New → Web Service → Docker.
+
 ## Project structure
 
 ```
@@ -66,7 +83,10 @@ src/truebit/
   loudness.py   EBU R128 (ffmpeg ebur128), peak, RMS, crest factor, clipping
   report.py     runs everything, saves JSON and spectrogram
   cli.py        typer + rich: spinner words, verdict panel, band chart, scan table
-tests/          makes real test audio with FFmpeg and checks every verdict (7 tests)
+  api.py        FastAPI: upload page, /analyze, /health
+  quota.py      5 analyses per IP per day (SQLite)
+tests/          real test audio made with FFmpeg: verdicts, API, quota, size limit (14 tests)
+Dockerfile      Python + FFmpeg image for hosting the API
 install.ps1     one-line Windows installer (FFmpeg + uv + TrueBit)
 ```
 
@@ -82,5 +102,4 @@ uv run pytest
 
 ## Next steps
 
-- A FastAPI service (`POST /analyze`) with a per-IP daily quota and Docker.
 - A machine-learning classifier: encode real lossless clips at 128/192/256/320 kbps (free labels), train on band energies, and report a confidence next to the rule-based verdict.
