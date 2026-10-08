@@ -177,9 +177,10 @@ def welcome(version, folder):
     console.print()
 
     commands = [
-        ("check FILE", "real or fake?"),
+        ("check FILE", "lossless? real bitrate?"),
         ("scan FOLDER", "a whole library"),
         ("compare A B", "which copy is better"),
+        ("fix PATH", "clean up noisy and fake files"),
         ("repair FILE", "fix clipping, clicks, hiss"),
         ("normalize FILE", "-14 LUFS like Spotify"),
         ("help · exit", ""),

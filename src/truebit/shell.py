@@ -15,13 +15,14 @@ from rich.text import Text
 
 from truebit.ui import BLUE, DIM, RED, console
 
-COMMANDS = ["check", "scan", "compare", "repair", "normalize", "serve", "version"]
+COMMANDS = ["check", "scan", "compare", "fix", "repair", "normalize", "serve", "version"]
 EXIT_WORDS = ["exit", "quit", "q", ":q"]
 
 HELP_ROWS = [
-    ("check FILE", "Is this file really what it claims? (add --save for JSON + spectrogram)"),
+    ("check FILE", "Lossless or not? What the bitrate says vs what it really is (--save)"),
     ("scan FOLDER", "Check every audio file in a folder (--json report.json to save)"),
     ("compare A B", "Which of two copies is genuinely better"),
+    ("fix FILE/FOLDER", "Repair noise and clipping, make fakes honest, normalize loudness"),
     ("repair FILE", "Fix clipping, clicks and hiss (--strength light/medium/strong)"),
     ("normalize FILE", "Set loudness to -14 LUFS (--preset apple / broadcast, --target -12)"),
     ("serve", "Start the web upload page (ctrl+c to stop)"),

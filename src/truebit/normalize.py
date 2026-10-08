@@ -11,6 +11,7 @@
 import json
 import subprocess
 
+from truebit.formats import encoder_options, output_extension, output_sample_rate, standard_bitrate_at_least
 from truebit.loudness import ebu_r128
 from truebit.output import output_path_for, run_filter
 from truebit.probe import AudioError, check_ffmpeg, probe
@@ -41,17 +42,15 @@ def measure_for_loudnorm(input_path, target_lufs):
     return json.loads(result.stderr[json_start: json_end + 1])
 
 
-# Normalizes a file. Returns (output path, before numbers, after numbers).
-def normalize_file(input_path, target_lufs=-14.0, output=None):
-    check_ffmpeg()
-    sample_rate = probe(input_path)["sample_rate_hz"]
-
+# Measures a file and builds the loudnorm filter that moves it to the target.
+# Returns (filter text, the measurements).
+def loudnorm_filter_for(input_path, target_lufs):
     # Step 1: measure
     measured = measure_for_loudnorm(input_path, target_lufs)
     if measured["input_i"] in ("-inf", "inf"):
         raise AudioError("The file is silent, there's nothing to normalize.")
 
-    # Step 2: apply one exact gain change using the measurements.
+    # Step 2: build one exact gain change from the measurements.
     # loudnorm only accepts values in certain ranges; very loud masters can measure above
     # 0 LUFS (we found one at +0.78), so each value is kept inside its allowed range.
     measured_i = keep_between(float(measured["input_i"]), -99, 0)
@@ -65,8 +64,22 @@ def normalize_file(input_path, target_lufs=-14.0, output=None):
         f":measured_LRA={measured_lra}:measured_thresh={measured_thresh}"
         f":offset={offset}:linear=true"
     )
-    output_path = output_path_for(input_path, f"normalized{int(target_lufs)}", output)
-    run_filter(input_path, output_path, filter_text, sample_rate)
+    return filter_text, measured
+
+
+# Normalizes a file. Returns (output path, before numbers, after numbers).
+# The result keeps the original's format (MP3 stays MP3) unless output_format is given.
+def normalize_file(input_path, target_lufs=-14.0, output=None, output_format=None):
+    check_ffmpeg()
+    file_info = probe(input_path)
+
+    # Step 1 and 2: measure, then apply one exact gain change
+    filter_text, measured = loudnorm_filter_for(input_path, target_lufs)
+    extension = output_extension(input_path, file_info["codec"], output_format)
+    output_path = output_path_for(input_path, f"normalized{int(target_lufs)}", output, extension)
+    encoder_args = encoder_options(extension, file_info, standard_bitrate_at_least(file_info["bitrate_kbps"]))
+    sample_rate = output_sample_rate(extension, file_info["sample_rate_hz"])
+    run_filter(input_path, output_path, filter_text, sample_rate, encoder_args)
 
     # Step 3: check the result
     after_lufs, after_range, after_peak = ebu_r128(output_path)

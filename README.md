@@ -1,6 +1,6 @@
 # TrueBit
 
-**Is your FLAC really lossless?** TrueBit catches fake lossless and fake 320 kbps audio by finding the frequency "cliff" every MP3 encoder leaves behind, then **repairs**, **normalizes** and **compares** what you keep. It's an interactive terminal app, and also a web API.
+**Is your FLAC really lossless?** TrueBit checks any audio file (FLAC, WAV, AIFF, ALAC, MP3, M4A/AAC, OGG, Opus, WMA…) for what's really inside: whether it's **truly lossless**, the bitrate its **properties say** versus what it **really holds**, plus tags, cover art, encoder and loudness. It catches fake lossless and fake 320 kbps audio by the frequency "cliff" every encoder leaves behind, then **fixes** problem files: noisy, clipped and fake upscaled audio comes out clean, honest and evenly loud. It's an interactive terminal app, and also a web API.
 
 ```powershell
 irm https://raw.githubusercontent.com/stackvs18/truebit/main/install.ps1 | iex
@@ -53,16 +53,30 @@ Type `truebit` and it opens like an app: the TRUEBIT logo, then a `truebit ›` 
 ```
   ▀█▀ █▀█ █ █ █▀▀ █▄▄ █ ▀█▀
    █  █▀▄ █▄█ ██▄ █▄█ █  █
-  v0.1.0 · is your FLAC really lossless?
+  v0.2.0 · is your FLAC really lossless?
 
-truebit › check fake_from_128.flac --save
-◆ Check  fake_from_128.flac
-▅▇▃▂ Sniffing for brickwalls… (1s · 1.1 MB · ctrl+c to stop)
+truebit › check fake_320.mp3
+◆ Check  fake_320.mp3
+▅▇▃▂ Sniffing for brickwalls… (1s · 237 KB · ctrl+c to stop)
 ▂▄▆█ Done in 1s
-╰─ FAKE LOSSLESS: upscaled from ~128 kbps
-   This FLAC file has a sharp cutoff at 16.8 kHz ...
-   16.0–17.0 kHz  ██████████ -96 dB  ← cliff
-◆ Saved  truebit-reports/fake_from_128.truebit.json
+╰─ FAKE 320 kbps: really ~128 kbps
+   It claims 320 kbps, but the cutoff at 16.8 kHz matches a ~128 kbps source.
+
+   Lossless?    No. MP3 is a lossy format: some sound was thrown away when it was encoded.
+   Says         320 kbps (CBR)   ← from the file's properties
+   Stores       323 kbps   ← 237 KB over 0:06
+   Really       ~128 kbps   ← the label is 2.5× too high
+
+   File         237 KB · 0:06
+   Format       MP3 (MPEG audio layer 3) · encoder Lavc63.1
+   Audio        44,100 Hz · stereo
+   Tags         none
+   Cutoff       16.75 kHz (drop 89.5 dB)
+   Loudness     -25.9 LUFS · true peak -15.1 dBTP · range 0.0 LU
+   Clean?       0 clipped samples · noise floor -29.9 dB · crest 13.1 dB
+
+   16.0–17.0 kHz  █████████ -96 dB  ← cliff
+truebit › fix fake_320.mp3
 truebit › exit
 ```
 
@@ -71,19 +85,66 @@ Every command also works directly:
 | Command | What it does |
 |---|---|
 | `truebit` | Opens interactive mode (`help`, `clear`, `exit`) |
-| `truebit check FILE` | **Real or fake?** Verdict, file details, loudness, and a band chart showing the cliff |
+| `truebit check FILE` | **Lossless or not?** What the bitrate **says**, what the file **stores**, what the sound is **really** worth; plus format, encoder, tags, cover art, loudness, clipping, noise and a band chart showing the cliff |
 | `truebit check FILE --save` | Also saves a JSON report and a spectrogram to `./truebit-reports/` (never next to your music) |
-| `truebit scan FOLDER` | Checks every audio file in a folder and its sub-folders; `--json report.json` saves everything |
+| `truebit scan FOLDER` | Every audio file in a folder and its sub-folders, with Says / Stores / Really columns and a count of genuine lossless, fake and lossy files; `--json report.json` saves everything |
+| `truebit fix FILE or FOLDER` | **Fixes problem files**: rebuilds clipped peaks, turns down hiss, re-encodes fakes at their honest bitrate, normalizes loudness. Saves to `./truebit-fixed/`, never touching the originals |
 | `truebit compare A B` | **Which copy is genuinely better**, judged by what's really in the files, not the label |
 | `truebit repair FILE` | Rebuilds clipped peaks, removes clicks, reduces hiss; shows before/after numbers. `--strength light/medium/strong`, `--no-declick`, `--no-denoise`… |
 | `truebit normalize FILE` | Sets loudness to **−14 LUFS** like Spotify/YouTube; `--preset apple` (−16), `broadcast` (−23), or `--target -12` |
+| `--format mp3` (on fix, repair, normalize) | Save as another format: `mp3`, `m4a`, `aac`, `flac`, `wav`, `aiff`, `ogg`, `opus`, `wma` |
 | `truebit serve` | Web upload page and JSON API |
 | `truebit version` | The installed version |
 
 Verdicts: **GENUINE LOSSLESS** · **FAKE LOSSLESS: upscaled from ~128 kbps** · **FAKE 320 kbps: really ~128 kbps** · **This is a lossy file**.
-Supported: FLAC, WAV, MP3, M4A/AAC, OGG, Opus, ALAC, AIFF, WMA (anything FFmpeg reads).
+**Reads:** FLAC, WAV, AIFF, ALAC, APE, WavPack, TTA, MP3, MP2, M4A/M4B/AAC, OGG Vorbis, Opus, WMA, AC3, MKA, WebM… (anything FFmpeg reads).
+**Writes back in the same format:** FLAC, WAV, AIFF, ALAC, MP3, M4A/AAC, OGG, Opus, WMA, keeping the tags and cover art. Formats TrueBit can't write become FLAC (lossless ones) or M4A (lossy ones).
 
 While it works, an animated **equalizer** bounces in macOS blue next to a shimmering verb that changes every 2 seconds (*Sniffing for brickwalls, Interrogating the Nyquist, Bribing the FFT…*) and a live timer. The analysis runs in a background thread while `rich.live.Live` redraws the line 20 times a second.
+
+---
+
+## Says, stores, really: the bitrate truth
+
+A music player shows one bitrate, and it can be a lie. TrueBit shows three:
+
+| Line | Where it comes from | Fake "320 kbps" MP3 |
+|---|---|---|
+| **Says** | The bitrate in the file's properties (what Windows Explorer or a music player shows), plus CBR or VBR for MP3s | 320 kbps (CBR) |
+| **Stores** | File size × 8 ÷ length: the data really in the file | 323 kbps |
+| **Really** | Where the sound stops (the cutoff), mapped to the encoder setting that cut it there | **~128 kbps**, the label is 2.5× too high |
+
+- A fake FLAC made from a 128 kbps MP3 **says** and **stores** 1,134 kbps, but is **really** ~128 kbps: 8.9× inflated.
+- Variable-bitrate files can **say** one thing and **store** another: an OGG labelled 192 kbps stored 145 kbps.
+- For MP3s, TrueBit reads the encoder ("LAME3.100") and whether the bitrate is constant or variable from the file's first frame (LAME writes an `Info` header for CBR and `Xing` for VBR).
+- The cutoff → bitrate table was measured on MP3s. AAC, Opus and Vorbis keep more treble per kbps, so for them TrueBit says where the sound stops ("cut at 16.5 kHz") instead of guessing a bitrate.
+
+---
+
+## Fix: noisy, clipped and fake upscaled audio
+
+```mermaid
+flowchart LR
+    F[song] --> C[check it]
+    C -->|1 in 1,000+ samples clipped| DC[rebuild the peaks]
+    C -->|hiss between −60 and −30 dB| DN[turn down the hiss]
+    C -->|fake upscaled| H[re-encode at its<br/>honest bitrate]
+    DC & DN & H --> N[normalize to −14 LUFS]
+    C -->|nothing wrong| N
+    N --> O[truebit-fixed/song]
+```
+
+`truebit fix "D:\Music"` checks every file, decides what it needs and saves the result to `./truebit-fixed/`:
+
+| Problem found | What fix does |
+|---|---|
+| **Clipping** on at least 1 in 1,000 samples | Rebuilds the cut-off wave tops (`adeclip`), then a limiter so they don't clip again |
+| **Background hiss** (a noise floor between −60 and −30 dB) | Turns it down at the measured level (`afftdn`) |
+| **Fake lossless** (a FLAC/WAV made from an MP3) | Saves it as an MP3 at its honest bitrate: no lossless sound was in it to keep |
+| **Fake bitrate** (a "320 kbps" MP3 that's really 128) | Re-encodes it at its honest bitrate, in its own format |
+| Every file | Normalizes the loudness to −14 LUFS (`--target` to change), keeps the tags and cover art |
+
+**Honest bitrate** = one step above what the sound really holds, so re-encoding adds no audible loss, but under TrueBit's 1.4× "fake" limit: ~128 kbps → **160**, ~192 → **224**, ~256 → **320**. A fixed fake comes out **smaller and honestly labelled**. It doesn't come out better, because nothing can bring back what the first encoder deleted. Repairs happen in a 32-bit float temporary file, so the only lossy step is the final encode.
 
 ---
 
@@ -150,7 +211,7 @@ flowchart LR
 
 **`compare`** ranks by what's really in the files: genuine lossless first (then higher sample rate and bit depth), then the **higher real cutoff**, then **fewer clipped samples**. It warns if the two lengths differ by more than 3 s (probably different recordings).
 
-Outputs are saved next to the input (`song.repaired.flac`, `song.normalized-14.flac`). Lossy inputs are saved as FLAC, so the fix adds no further loss.
+Outputs are saved next to the input (`song.repaired.mp3`, `song.normalized-14.flac`) **in the original's format**: an MP3 stays an MP3 (at its original bitrate or the next standard one up), an ALAC stays ALAC, and tags and cover art are kept. `--format` saves as something else.
 
 ---
 
@@ -172,15 +233,17 @@ Repair (strong): 75,482 clipped samples → **0**, background noise −35.3 → 
 
 | Feature | Result |
 |---|---|
-| Scan | 36 files in 30 s, **11 fakes**, e.g. "320 kbps" MP3s with a 16.0 kHz cliff (really ~128 kbps) |
+| Scan | **11 fakes**: 8 MP3s labelled 256 or 320 kbps that are really ~128, and 3 AACs, e.g. a "262 kbps" M4A whose sound stops at 15.0 kHz |
+| Fix | A fake "320 kbps" MP3 with 1,780,272 clipped samples at +0.8 LUFS → peaks rebuilt, honest **160 kbps** MP3 at −14.4 LUFS, **7.9 → 3.9 MB**. A fake "262 kbps" AAC → honest 160 kbps AAC, **3.1 → 1.9 MB** |
 | Repair | A bass-boosted track: **1,626,790 clipped samples → 0**, true peak +4.8 → +1.8 dBTP |
 | Normalize | A master at **+0.78 LUFS** → exactly **−14 LUFS** |
 | Compare | Two copies with the same cutoff: kept the one with 168,866 clipped samples instead of 1,780,272 |
 
-Real-world testing found three bugs, each now fixed with a regression test:
+Real-world testing found four bugs, each now fixed with a regression test:
 1. **False clipping.** FFmpeg's stereo-to-mono downmix *adds* the channels, so a clean song peaking at 0.95 looked like it peaked at 1.29 (33,810 "clipped" samples). Now peaks and clipping are measured on every channel, and mono is made by averaging.
 2. **Loud masters crashed normalize.** `loudnorm` rejects a measured loudness above 0 LUFS, and one master measured +0.78. The measurements are now kept inside the filter's allowed ranges.
-3. **Piped output crashed on Windows** (found while testing the installer). `truebit scan D:\Music > report.txt` used Windows' old cp1252 encoding, which has no `◆` or `█`. Output is now always UTF-8.
+3. **TrueBit's own outputs looked fake.** `repair` and `normalize` used to save MP3s as FLAC; scanning the library afterwards flagged those files as FAKE LOSSLESS. Outputs now keep the original format.
+4. **Piped output crashed on Windows** (found while testing the installer). `truebit scan D:\Music > report.txt` used Windows' old cp1252 encoding, which has no `◆` or `█`. Output is now always UTF-8.
 
 ---
 
@@ -194,7 +257,7 @@ truebit serve          # http://127.0.0.1:8000  ·  API docs at /docs
 |---|---|---|
 | GET | `/` | Drag-and-drop upload page, with the one-line install command and a Copy button |
 | POST | `/analyze` | Upload a file (max 50 MB), get the full JSON report; `?spectrogram=true` adds the picture as base64 |
-| GET | `/health` | `{"status": "ok", "version": "0.1.0"}` |
+| GET | `/health` | `{"status": "ok", "version": "0.2.0"}` |
 | GET | `/install.ps1` | The short install link: redirects to [`install.ps1`](install.ps1) on GitHub, so `irm https://<your-site>/install.ps1 \| iex` works |
 
 ```mermaid
@@ -229,8 +292,13 @@ sequenceDiagram
   "verdict": "fake_lossless",
   "verdict_headline": "FAKE LOSSLESS: upscaled from ~128 kbps",
   "verdict_detail": "This FLAC file has a sharp cutoff at 16.8 kHz ...",
-  "file": {"container": "flac", "codec": "flac", "lossy_codec": false, "bitrate_kbps": 1131,
-           "sample_rate_hz": 44100, "bit_depth": 24, "channels": 2, "duration_seconds": 8.0},
+  "lossless": {"is_lossless": false, "answer": "No. FLAC is a lossless format, but the sound inside came from a lossy file."},
+  "bitrate": {"label_kbps": 1134, "stored_kbps": 1134, "real_kbps": 128, "real_text": "~128 kbps",
+              "inflated_times": 8.9, "mode": null},
+  "file": {"container": "flac", "codec": "flac", "codec_name": "FLAC (Free Lossless Audio Codec)",
+           "lossy_codec": false, "bitrate_kbps": 1134, "data_rate_kbps": 1134, "sample_rate_hz": 44100,
+           "bit_depth": 24, "channels": 2, "channel_layout": "stereo", "duration_seconds": 6.0,
+           "file_size_bytes": 850123, "encoder": "Lavf63.1.102", "tags": {}, "has_cover_art": false},
   "loudness": {"integrated_lufs": -25.9, "loudness_range_lu": 0.1, "true_peak_dbtp": -15.3,
                "sample_peak_dbfs": -12.4, "rms_dbfs": -25.3, "crest_factor_db": 12.9,
                "noise_floor_dbfs": -26.8, "clipped_samples": 0},
@@ -266,6 +334,8 @@ flowchart LR
     U3[truebit repair] --> RP[repair.py<br/>adeclick, adeclip, afftdn, alimiter]
     U4[truebit normalize] --> N[normalize.py<br/>loudnorm, two passes]
     U5[truebit compare] --> C[compare.py] --> R
+    U6[truebit fix] --> FX[fix.py<br/>plan → repair → honest bitrate → loudnorm] --> R
+    RP & N & FX --> FM[formats.py<br/>same format out, tags + cover art]
 ```
 
 | Layer | Tool | Why |
@@ -289,19 +359,21 @@ src/truebit/
   cli.py        every command (Typer)
   shell.py      interactive mode: the truebit › prompt, dragged-in paths
   ui.py         the look: macOS blue, ◆ / ╰─ lines, equalizer spinner, logo
-  probe.py      ffprobe file details + ffmpeg decoding to NumPy
+  formats.py    every audio format: which are lossy, how to write each one, honest bitrates
+  probe.py      ffprobe details (bitrates, tags, cover art, encoder, CBR/VBR) + decoding to NumPy
   spectrum.py   Welch spectrum, 250 Hz bands, find_cutoff()
-  verdict.py    cutoff → likely source → verdict
+  verdict.py    cutoff → likely source → verdict; says / stores / really; "is it lossless?"
   loudness.py   EBU R128 loudness, true peak, RMS, crest factor, clipping, noise floor
   report.py     runs every check, saves JSON + spectrogram, finds audio files
   repair.py     declick → declip → denoise → limiter
   normalize.py  two-pass EBU R128 loudness normalization
+  fix.py        one command for problem files: repair, make fakes honest, normalize
   compare.py    which copy is genuinely better
-  output.py     shared: output file names, running FFmpeg filters
+  output.py     shared: output file names, running FFmpeg (keeps tags and cover art)
   api.py        FastAPI: upload page, /analyze, /health, /install.ps1
   quota.py      5 analyses per IP per day (SQLite)
   upload.html   the upload page, with the same equalizer spinner
-tests/          real test audio made with FFmpeg (30 tests)
+tests/          real test audio made with FFmpeg, in every format (50 tests)
 scripts/        make_screenshot.py: records the terminal output as docs/check.png
 install.ps1     one-line Windows installer; re-run to update
 Dockerfile      Python + FFmpeg image for the web API
@@ -317,13 +389,13 @@ git clone https://github.com/stackvs18/truebit
 cd truebit
 uv sync
 uv run truebit check some_song.flac
-uv run pytest                    # 30 tests, about 6 seconds
+uv run pytest                    # 50 tests, about 25 seconds
 
 # Make `truebit` a real command that uses this folder (code changes apply instantly)
 uv tool install --editable . --force
 ```
 
-The tests generate real audio with FFmpeg (pink noise, MP3 encodes, fakes, clipped tone bursts with hiss) and check the verdicts, the cutoff finder, repair numbers, normalize accuracy (±1 LUFS), compare, interactive-mode parsing, piped output, the three real-music bugs and every API status code.
+The tests generate real audio with FFmpeg (pink noise, MP3 encodes, fakes, clipped tone bursts with hiss) and check the verdicts, the cutoff finder, every format in and out (MP3, M4A, AAC, OGG, Opus, WMA, WAV, AIFF, ALAC), says / stores / really, CBR vs VBR, tags and cover art surviving, fix on fakes and hiss, repair numbers, normalize accuracy (±1 LUFS), compare, interactive-mode parsing, piped output, the real-music bugs and every API status code.
 
 ---
 
@@ -340,7 +412,7 @@ The tests generate real audio with FFmpeg (pink noise, MP3 encodes, fakes, clipp
 1. A machine-learning classifier: encode lossless clips at 128/192/256/320 kbps (free labels), train on band energies, and report a confidence next to the rule-based verdict.
 2. `truebit dupes`: find duplicate songs in a library and keep the best copy.
 3. An HTML report for a whole-library scan.
-4. Batch repair and normalize for folders.
+4. Use a faster declipper for whole libraries (rebuilding peaks takes about a minute per song).
 
 ---
 

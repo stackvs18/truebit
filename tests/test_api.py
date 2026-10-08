@@ -44,6 +44,8 @@ def test_analyze_finds_the_fake(client, fake_flac):
         response = client.post("/analyze", files={"file": ("fake.flac", file, "audio/flac")})
     assert response.status_code == 200
     assert response.json()["verdict"] == "fake_lossless"
+    assert response.json()["bitrate"]["real_kbps"] is not None  # a real cutoff was found
+    assert response.json()["lossless"]["is_lossless"] is False
     assert response.headers["X-Quota-Remaining"] == "1"
 
 

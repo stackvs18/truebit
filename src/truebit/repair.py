@@ -11,6 +11,7 @@
 #
 # What it can NOT do: bring back frequencies an MP3 encoder deleted. That information is gone.
 
+from truebit.formats import encoder_options, output_extension, output_sample_rate, standard_bitrate_at_least
 from truebit.loudness import analyze_loudness
 from truebit.output import output_path_for, run_filter
 from truebit.probe import check_ffmpeg, decode, probe
@@ -51,8 +52,10 @@ def measure(file_path, sample_rate, channel_count):
     }
 
 
-# Repairs a file and returns (output path, before numbers, after numbers)
-def repair_file(input_path, output=None, declick=True, declip=True, denoise=True, strength="medium"):
+# Repairs a file and returns (output path, before numbers, after numbers).
+# The result keeps the original's format (MP3 stays MP3) unless output_format is given.
+def repair_file(input_path, output=None, declick=True, declip=True, denoise=True, strength="medium",
+                output_format=None):
     check_ffmpeg()
     if strength not in NOISE_REDUCTION_DB:
         raise ValueError("strength must be light, medium or strong")
@@ -70,10 +73,13 @@ def repair_file(input_path, output=None, declick=True, declip=True, denoise=True
     if noise_floor is None or noise_floor > MUSIC_NOT_HISS_DB:
         noise_floor = DEFAULT_NOISE_FLOOR_DB
 
-    # Step 3: run the repair filters into a new file
-    output_path = output_path_for(input_path, "repaired", output)
+    # Step 3: run the repair filters into a new file, in the same format (and at least the
+    # same bitrate) as the original
+    extension = output_extension(input_path, file_info["codec"], output_format)
+    output_path = output_path_for(input_path, "repaired", output, extension)
     filter_chain = build_filter_chain(declick, declip, denoise, strength, noise_floor)
-    run_filter(input_path, output_path, filter_chain, sample_rate)
+    encoder_args = encoder_options(extension, file_info, standard_bitrate_at_least(file_info["bitrate_kbps"]))
+    run_filter(input_path, output_path, filter_chain, output_sample_rate(extension, sample_rate), encoder_args)
 
     # Step 4: measure the result
     after = measure(output_path, sample_rate, channel_count)

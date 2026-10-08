@@ -5,13 +5,11 @@ import json
 import subprocess
 from pathlib import Path
 
+from truebit.formats import AUDIO_EXTENSIONS
 from truebit.loudness import analyze_loudness
 from truebit.probe import check_ffmpeg, decode, probe, to_mono
 from truebit.spectrum import analyze_spectrum
-from truebit.verdict import make_verdict
-
-AUDIO_EXTENSIONS = {".flac", ".wav", ".mp3", ".m4a", ".aac", ".ogg", ".opus", ".alac", ".aiff",
-                    ".aif", ".wma"}
+from truebit.verdict import bitrate_truth, lossless_answer, make_verdict
 
 
 # The full report for one audio file
@@ -27,11 +25,14 @@ def analyze_file(file_path):
     spectrum = analyze_spectrum(mono_samples, file_info["sample_rate_hz"])
     loudness = analyze_loudness(file_path, all_samples, file_info["sample_rate_hz"], channel_count)
     verdict_key, headline, detail = make_verdict(file_info, spectrum)
+    is_lossless, lossless_text = lossless_answer(file_info, verdict_key)
 
     return {
         "verdict": verdict_key,
         "verdict_headline": headline,
         "verdict_detail": detail,
+        "lossless": {"is_lossless": is_lossless, "answer": lossless_text},
+        "bitrate": bitrate_truth(file_info, spectrum),
         "file": file_info,
         "loudness": loudness,
         "spectrum": spectrum,

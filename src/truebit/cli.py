@@ -1,9 +1,10 @@
-# The `truebit` command, styled like Claude Code.
+# The `truebit` command.
 #
-#   truebit                          welcome screen
-#   truebit check song.flac          real or fake? verdict, spectrum bands, loudness
+#   truebit                          interactive mode (the truebit › prompt)
+#   truebit check song.flac          lossless or not? the bitrate it says vs what it really holds
 #   truebit scan "D:\Music"          a whole folder (add --json report.json to save)
 #   truebit compare a.flac b.mp3     which copy is genuinely better?
+#   truebit fix "D:\Music"           repair noise, make fakes honest, normalize loudness
 #   truebit repair song.wav          fix clipping, clicks and background noise
 #   truebit normalize song.flac      set loudness to -14 LUFS (Spotify) or another target
 #   truebit serve                    web API and upload page
@@ -19,8 +20,20 @@ from rich.text import Text
 from truebit import __version__
 from truebit.probe import AudioError
 from truebit.report import analyze_file, find_audio_files, save_report, save_spectrogram
-from truebit.ui import (BLUE, DIM, GREEN, RED, YELLOW, console, format_size,
-                        indented, run_with_spinner, tool_call, tool_result, welcome)
+from truebit.ui import (
+    BLUE,
+    DIM,
+    GREEN,
+    RED,
+    YELLOW,
+    console,
+    format_size,
+    indented,
+    run_with_spinner,
+    tool_call,
+    tool_result,
+    welcome,
+)
 
 app = typer.Typer(help="TrueBit: catch fake lossless and fake 320 kbps audio.",
                   add_completion=False, invoke_without_command=True)
@@ -62,30 +75,96 @@ def bands_chart(spectrum):
     return chart
 
 
+# Shows a length in seconds as minutes:seconds, e.g. 200.4 -> "3:20"
+def minutes_and_seconds(seconds):
+    whole_seconds = round(seconds)
+    return f"{whole_seconds // 60}:{whole_seconds % 60:02d}"
+
+
+# The "Really" line: what the sound is really worth
+def real_quality_text(report):
+    bitrate = report["bitrate"]
+    text = bitrate["real_text"]
+    if bitrate["inflated_times"] is not None and bitrate["inflated_times"] >= 1.4:
+        text = text + f"   ← the label is {bitrate['inflated_times']:g}× too high"
+    return text
+
+
+# The codec in words, plus the container when it has a different name (e.g. "AAC ... in MP4")
+def format_text(file_info):
+    text = file_info["codec_name"]
+    if file_info["container"].lower() not in text.lower():
+        text = text + " in " + file_info["container_name"]
+    if file_info["encoder"]:
+        text = text + " · encoder " + file_info["encoder"]
+    return text
+
+
+# Title · Artist · Album (Year) · cover art
+def tags_text(file_info):
+    tags = file_info["tags"]
+    parts = []
+    for name in ["title", "artist", "album"]:
+        if name in tags:
+            parts.append(tags[name])
+    if "date" in tags and len(parts) > 0:
+        parts[-1] = parts[-1] + f" ({tags['date'][:4]})"
+    if file_info["has_cover_art"]:
+        parts.append("cover art")
+    if len(parts) == 0:
+        return "none"
+    return " · ".join(parts)
+
+
 # Prints one file's report as tool results
 def print_report(report):
     file_info = report["file"]
     spectrum = report["spectrum"]
     loudness = report["loudness"]
+    bitrate = report["bitrate"]
     color = VERDICT_COLORS.get(report["verdict"], "")
 
     tool_result(report["verdict_headline"], style="bold " + color)
     indented(report["verdict_detail"])
     console.print()
 
-    bitrate = f"{file_info['bitrate_kbps']} kbps" if file_info["bitrate_kbps"] else "?"
+    # Step 1: the questions people ask: is it lossless, and what's the real bitrate?
+    lossless_color = GREEN if report["lossless"]["is_lossless"] else color
+    says = f"{bitrate['label_kbps']} kbps" if bitrate["label_kbps"] else "not given"
+    if bitrate["mode"]:
+        says = says + f" ({bitrate['mode']})"
+    says = says + "   ← from the file's properties"
+    stores = "?"
+    if bitrate["stored_kbps"]:
+        stores = (f"{bitrate['stored_kbps']} kbps   ← {format_size(file_info['file_size_bytes'])} over "
+                  f"{minutes_and_seconds(file_info['duration_seconds'])}")
+    question_rows = [
+        ("Lossless?", report["lossless"]["answer"], lossless_color),
+        ("Says", says, ""),
+        ("Stores", stores, ""),
+        ("Really", real_quality_text(report), color),
+    ]
+    for label, value, value_style in question_rows:
+        console.print(Text(f"   {label:<12} ", style=DIM) + Text(value, style=value_style))
+    console.print()
+
+    # Step 2: everything else about the file
     depth = f" · {file_info['bit_depth']}-bit" if file_info["bit_depth"] else ""
+    layout = file_info["channel_layout"] or f"{file_info['channels']} ch"
     if spectrum["cutoff_hz"]:
         cutoff = f"{spectrum['cutoff_hz'] / 1000:.2f} kHz (drop {spectrum['cutoff_drop_db']} dB)"
     else:
         cutoff = "none, sound reaches the top"
     rows = [
-        ("Format", f"{file_info['codec'].upper()} · {bitrate}"),
-        ("Sample rate", f"{file_info['sample_rate_hz']:,} Hz · {file_info['channels']} ch{depth}"),
-        ("Duration", f"{file_info['duration_seconds']:.1f} s"),
+        ("File", f"{format_size(file_info['file_size_bytes'])} · {minutes_and_seconds(file_info['duration_seconds'])}"),
+        ("Format", format_text(file_info)),
+        ("Audio", f"{file_info['sample_rate_hz']:,} Hz · {layout}{depth}"),
+        ("Tags", tags_text(file_info)),
         ("Cutoff", cutoff),
-        ("Loudness", f"{loudness['integrated_lufs']} LUFS · true peak {loudness['true_peak_dbtp']} dBTP"),
-        ("Clipping", f"{loudness['clipped_samples']} clipped samples · crest {loudness['crest_factor_db']} dB"),
+        ("Loudness", f"{loudness['integrated_lufs']} LUFS · true peak {loudness['true_peak_dbtp']} dBTP"
+                     f" · range {loudness['loudness_range_lu']} LU"),
+        ("Clean?", f"{loudness['clipped_samples']:,} clipped samples · noise floor "
+                   f"{loudness['noise_floor_dbfs']} dB · crest {loudness['crest_factor_db']} dB"),
     ]
     for label, value in rows:
         console.print(Text(f"   {label:<12} ", style=DIM) + Text(value))
@@ -110,6 +189,30 @@ def check(file: Path = typer.Argument(..., exists=True, dir_okay=False, help="Au
         image_path = save_spectrogram(file)
         if image_path is not None:
             tool_call("Saved", str(image_path))
+
+
+# Codec names people know (FFmpeg calls WMA "wmav2", and WAV/AIFF "pcm_s16le"...)
+SHORT_CODEC_NAMES = {"wmav1": "WMA", "wmav2": "WMA", "mp3float": "MP3"}
+
+
+# A short name for the format, e.g. "MP3", "FLAC", "WAV", "AAC"
+def short_format(file_info):
+    codec = file_info["codec"]
+    if codec.startswith("pcm_"):
+        return file_info["container"].upper()
+    return SHORT_CODEC_NAMES.get(codec, codec.upper())
+
+
+# The "Really" column of the scan table, kept short
+def short_real_quality(report):
+    bitrate = report["bitrate"]
+    if bitrate["real_kbps"] is not None:
+        return bitrate["real_text"]
+    if bitrate["real_text"] == "lossless":
+        return "lossless"
+    if report["spectrum"]["cutoff_hz"] is None:
+        return "full band"
+    return f"cut at {report['spectrum']['cutoff_hz'] / 1000:.1f} kHz"
 
 
 # Analyses every file in a list, one by one (run inside the spinner)
@@ -138,23 +241,39 @@ def scan(folder: Path = typer.Argument(..., exists=True, file_okay=False, help="
     table = Table(box=ROUNDED, border_style=DIM, header_style="bold")
     table.add_column("File")
     table.add_column("Format")
-    table.add_column("Cutoff", justify="right")
+    table.add_column("Says", justify="right")
+    table.add_column("Stores", justify="right")
+    table.add_column("Really", justify="right")
     table.add_column("Verdict")
-    fake_count = 0
+    counts = {"lossless": 0, "fake": 0, "lossy": 0, "error": 0}
     for file_path in audio_files:
         report = reports[str(file_path)]
         if "error" in report:
-            table.add_row(file_path.name, "—", "—", f"[{RED}]{report['error']}[/]")
+            counts["error"] = counts["error"] + 1
+            table.add_row(file_path.name, "—", "—", "—", "—", f"[{RED}]{report['error']}[/]")
             continue
+
+        # Count each kind of file for the summary line
         if report["verdict"].startswith("fake"):
-            fake_count = fake_count + 1
-        cutoff = report["spectrum"]["cutoff_hz"]
+            counts["fake"] = counts["fake"] + 1
+        elif report["verdict"] == "lossless":
+            counts["lossless"] = counts["lossless"] + 1
+        else:
+            counts["lossy"] = counts["lossy"] + 1
+
+        bitrate = report["bitrate"]
         color = VERDICT_COLORS.get(report["verdict"], "")
-        table.add_row(file_path.name, report["file"]["codec"].upper(),
-                      f"{cutoff / 1000:.1f} kHz" if cutoff else "full",
+        table.add_row(file_path.name, short_format(report["file"]),
+                      f"{bitrate['label_kbps'] or '?'}", f"{bitrate['stored_kbps'] or '?'}",
+                      f"[{color}]{short_real_quality(report)}[/]",
                       f"[{color}]{report['verdict_headline']}[/]")
     console.print(table)
-    tool_result(f"{len(audio_files)} files · {fake_count} fake", style="bold")
+    summary = (f"{len(audio_files)} files · {counts['lossless']} genuine lossless · "
+               f"{counts['fake']} fake · {counts['lossy']} lossy")
+    if counts["error"] > 0:
+        summary = summary + f" · {counts['error']} unreadable"
+    tool_result(summary, style="bold")
+    tool_result("Says and Stores are in kbps: what the properties say, and the file's size ÷ length.", style=DIM)
     if json_out is not None:
         json_out.write_text(json.dumps(reports, indent=2), encoding="utf-8")
         tool_call("Write", str(json_out))
@@ -193,7 +312,8 @@ def before_after_table():
 
 @app.command()
 def repair(file: Path = typer.Argument(..., exists=True, dir_okay=False, help="Audio file to repair."),
-           output: Path = typer.Option(None, "--output", "-o", help="Where to save (default: NAME.repaired.flac)."),
+           output: Path = typer.Option(None, "--output", "-o", help="Where to save (default: NAME.repaired + same format)."),
+           output_format: str = typer.Option(None, "--format", help="Save as another format: mp3, m4a, flac, wav, ogg, opus..."),
            strength: str = typer.Option("medium", help="Noise reduction: light, medium or strong."),
            declip: bool = typer.Option(True, help="Rebuild clipped peaks."),
            declick: bool = typer.Option(True, help="Remove clicks and crackle."),
@@ -204,7 +324,7 @@ def repair(file: Path = typer.Argument(..., exists=True, dir_okay=False, help="A
     tool_call("Repair", f"{file.name}, strength={strength}")
     try:
         output_path, before, after = run_with_spinner(repair_file, file, output, declick, declip,
-                                                      denoise, strength,
+                                                      denoise, strength, output_format,
                                                       detail=format_size(file.stat().st_size))
     except (AudioError, ValueError) as error:
         fail(str(error))
@@ -222,7 +342,8 @@ def repair(file: Path = typer.Argument(..., exists=True, dir_okay=False, help="A
 def normalize(file: Path = typer.Argument(..., exists=True, dir_okay=False, help="Audio file to normalize."),
               preset: str = typer.Option("spotify", help="spotify / youtube (-14), apple (-16), broadcast (-23)."),
               target: float = typer.Option(None, help="Custom target in LUFS, e.g. -12 (overrides preset)."),
-              output: Path = typer.Option(None, "--output", "-o", help="Where to save.")):
+              output: Path = typer.Option(None, "--output", "-o", help="Where to save."),
+              output_format: str = typer.Option(None, "--format", help="Save as another format: mp3, m4a, flac, wav, ogg, opus...")):
     """Make a track exactly as loud as streaming services play it (two-pass EBU R128)."""
     from truebit.normalize import PRESETS, normalize_file
 
@@ -233,9 +354,9 @@ def normalize(file: Path = typer.Argument(..., exists=True, dir_okay=False, help
 
     tool_call("Normalize", f"{file.name}, target={target:g} LUFS")
     try:
-        output_path, before, after = run_with_spinner(normalize_file, file, target, output,
+        output_path, before, after = run_with_spinner(normalize_file, file, target, output, output_format,
                                                       detail=format_size(file.stat().st_size))
-    except AudioError as error:
+    except (AudioError, ValueError) as error:
         fail(str(error))
 
     table = before_after_table()
@@ -247,6 +368,85 @@ def normalize(file: Path = typer.Argument(..., exists=True, dir_okay=False, help
     tool_call("Write", str(output_path))
 
 
+# One row of the fix table: what was found, what was done, and the result
+def fix_row(result):
+    before = result["before"]
+    after = result["after"]
+    plan = result["plan"]
+
+    # Step 1: what was wrong
+    if len(plan["problems"]) > 0:
+        found = f"[{YELLOW}]" + "\n".join(plan["problems"]) + "[/]"
+    else:
+        found = f"[{DIM}]nothing wrong[/]"
+
+    # Step 2: what TrueBit did
+    done = []
+    if plan["declip"]:
+        done.append("rebuilt clipped peaks")
+    if plan["denoise"]:
+        done.append(f"background noise {before['loudness']['noise_floor_dbfs']:g} → "
+                    f"{after['loudness']['noise_floor_dbfs']:g} dB")
+    if plan["honest_bitrate"] is not None:
+        done.append(f"made honest: {short_format(after['file'])} {plan['honest_bitrate']} kbps")
+    done.append(f"loudness {before['loudness']['integrated_lufs']:g} → {after['loudness']['integrated_lufs']:g} LUFS")
+
+    # Step 3: the result
+    color = VERDICT_COLORS.get(after["verdict"], "")
+    size_change = (f"{format_size(before['file']['file_size_bytes'])} → "
+                   f"{format_size(after['file']['file_size_bytes'])}")
+    outcome = f"[{color}]{after['verdict_headline']}[/]\n{size_change}"
+    return found, "\n".join(done), outcome
+
+
+@app.command()
+def fix(path: Path = typer.Argument(..., exists=True, help="An audio file, or a folder of them."),
+        target: float = typer.Option(-14.0, help="Loudness target in LUFS (-14 = Spotify/YouTube, -16 = Apple)."),
+        strength: str = typer.Option("light", help="Noise reduction when hiss is found: light, medium or strong."),
+        output_format: str = typer.Option(None, "--format", help="Save everything as one format: mp3, m4a, flac..."),
+        output_folder: Path = typer.Option(Path("truebit-fixed"), "--output-folder", "-o",
+                                           help="Where the fixed files go (the originals are never changed).")):
+    """Fix problem files: repair noise and clipping, make fakes honest, normalize loudness."""
+    from truebit.fix import fix_many
+
+    # Step 1: which files (a folder's files, but never the ones already in the output folder)
+    if path.is_dir():
+        output_root = output_folder.resolve()
+        file_list = []
+        for file_path in find_audio_files(path):
+            if output_root not in file_path.resolve().parents:
+                file_list.append(file_path)
+    else:
+        file_list = [path]
+    tool_call("Fix", f"{path.name or path} ({len(file_list)} file{'s' if len(file_list) != 1 else ''})")
+    if len(file_list) == 0:
+        tool_result("No audio files found.")
+        return
+
+    # Step 2: fix them all
+    results = run_with_spinner(fix_many, file_list, output_folder, target, strength, output_format,
+                               detail=f"{len(file_list)} files")
+
+    # Step 3: show what happened
+    table = Table(box=ROUNDED, border_style=DIM, header_style="bold", show_lines=True)
+    table.add_column("File")
+    table.add_column("Found")
+    table.add_column("Done")
+    table.add_column("Result")
+    fixed_count = 0
+    for result in results:
+        if "error" in result:
+            table.add_row(result["input"].name, f"[{RED}]{result['error']}[/]", "—", "—")
+            continue
+        fixed_count = fixed_count + 1
+        found, done, outcome = fix_row(result)
+        table.add_row(result["input"].name + f"\n[{DIM}]→ {result['output'].name}[/]", found, done, outcome)
+    console.print(table)
+    tool_call("Saved", f"{fixed_count} file{'s' if fixed_count != 1 else ''} in {output_folder}")
+    tool_result("Tags and cover art are kept. Nothing can bring back sound a lossy encoder deleted, "
+                "so fixed fakes are honest and smaller, not better.", style=DIM)
+
+
 # One cell of the compare table
 def compare_cell(report, kind):
     file_info = report["file"]
@@ -254,7 +454,7 @@ def compare_cell(report, kind):
         color = VERDICT_COLORS.get(report["verdict"], "")
         return f"[{color}]{report['verdict_headline']}[/]"
     if kind == "format":
-        return f"{file_info['codec'].upper()} · {file_info['bitrate_kbps'] or '?'} kbps"
+        return f"{short_format(file_info)} · {file_info['bitrate_kbps'] or '?'} kbps"
     if kind == "cutoff":
         cutoff = report["spectrum"]["cutoff_hz"]
         if cutoff:

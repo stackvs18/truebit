@@ -8,6 +8,7 @@ from pathlib import Path
 from rich.console import Console
 from rich.text import Text
 
+import truebit
 import truebit.cli as cli
 import truebit.ui as ui
 from truebit.report import analyze_file
@@ -19,7 +20,7 @@ ui.console = Console(record=True, width=92, force_terminal=True, color_system="t
 cli.console = ui.console
 
 # Step 2: print what a real run looks like (with one frame of the animated spinner)
-ui.welcome("0.1.0", Path("D:/Music"))
+ui.welcome(truebit.__version__, Path("D:/Music"))
 ui.console.print(Text("truebit ", style="bold " + ui.BLUE) + Text("› ", style=ui.DIM) + Text("check " + audio_file.name + " --save"))
 ui.console.print()
 ui.tool_call("Check", audio_file.name)

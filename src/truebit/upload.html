@@ -61,8 +61,8 @@
 
   <label class="drop" id="drop">
     <strong>Choose or drop an audio file</strong>
-    <span>FLAC, WAV, MP3, M4A, OGG · up to 50 MB · 5 checks per day · files are deleted right after</span>
-    <input type="file" id="file" accept="audio/*" hidden>
+    <span>FLAC, WAV, AIFF, ALAC, MP3, M4A, AAC, OGG, Opus, WMA… · up to 50 MB · 5 checks per day · files are deleted right after</span>
+    <input type="file" id="file" accept="audio/*,.flac,.wav,.aiff,.aif,.ape,.wv,.mp3,.m4a,.m4b,.aac,.ogg,.oga,.opus,.wma,.ac3,.mka,.webm" hidden>
   </label>
 
   <div id="result"></div>
@@ -207,13 +207,38 @@
     var cutoff = "none (full band)";
     if (report.spectrum.cutoff_hz) { cutoff = (report.spectrum.cutoff_hz / 1000).toFixed(2) + " kHz"; }
 
+    // The three bitrates: what the properties say, what's stored, what the sound is really worth
+    var bitrate = report.bitrate;
+    var says = bitrate.label_kbps ? bitrate.label_kbps + " kbps" : "not given";
+    if (bitrate.mode) { says = says + " (" + bitrate.mode + ")"; }
+    var stores = bitrate.stored_kbps ? bitrate.stored_kbps + " kbps (file size ÷ length)" : "?";
+    var really = bitrate.real_text;
+    if (bitrate.inflated_times && bitrate.inflated_times >= 1.4) {
+      really = really + " (the label is " + bitrate.inflated_times + "× too high)";
+    }
+
+    // Title · Artist · Album, if the file has tags
+    var tagParts = [];
+    var tagNames = ["title", "artist", "album"];
+    for (var i = 0; i < tagNames.length; i++) {
+      if (report.file.tags[tagNames[i]]) { tagParts.push(report.file.tags[tagNames[i]]); }
+    }
+    if (report.file.has_cover_art) { tagParts.push("cover art"); }
+
     var html = '<div class="result">'
       + '<p class="verdict ' + colour + '">' + escapeText(report.verdict_headline) + "</p>"
       + '<p class="detail">' + escapeText(report.verdict_detail) + "</p><table>"
-      + "<tr><td>Format</td><td>" + escapeText(report.file.codec.toUpperCase() + " · " + (report.file.bitrate_kbps || "?") + " kbps") + "</td></tr>"
-      + "<tr><td>Sample rate</td><td>" + escapeText(report.file.sample_rate_hz + " Hz") + "</td></tr>"
+      + "<tr><td>Lossless?</td><td>" + escapeText(report.lossless.answer) + "</td></tr>"
+      + "<tr><td>Bitrate says</td><td>" + escapeText(says) + "</td></tr>"
+      + "<tr><td>Actually stores</td><td>" + escapeText(stores) + "</td></tr>"
+      + "<tr><td>Really worth</td><td>" + escapeText(really) + "</td></tr>"
+      + "<tr><td>Format</td><td>" + escapeText(report.file.codec_name + (report.file.encoder ? " · " + report.file.encoder : "")) + "</td></tr>"
+      + "<tr><td>Audio</td><td>" + escapeText(report.file.sample_rate_hz + " Hz · " + (report.file.channel_layout || report.file.channels + " ch") + (report.file.bit_depth ? " · " + report.file.bit_depth + "-bit" : "")) + "</td></tr>"
+      + "<tr><td>Size</td><td>" + escapeText(formatSize(report.file.file_size_bytes) + " · " + Math.round(report.file.duration_seconds) + " s") + "</td></tr>"
+      + "<tr><td>Tags</td><td>" + escapeText(tagParts.length > 0 ? tagParts.join(" · ") : "none") + "</td></tr>"
       + "<tr><td>Cutoff</td><td>" + escapeText(cutoff) + "</td></tr>"
       + "<tr><td>Loudness</td><td>" + escapeText(report.loudness.integrated_lufs + " LUFS · true peak " + report.loudness.true_peak_dbtp + " dBTP") + "</td></tr>"
+      + "<tr><td>Clean?</td><td>" + escapeText(report.loudness.clipped_samples + " clipped samples · noise floor " + report.loudness.noise_floor_dbfs + " dB") + "</td></tr>"
       + "</table>";
     if (report.spectrogram_png_base64) {
       html = html + '<img alt="Spectrogram" src="data:image/png;base64,' + report.spectrogram_png_base64 + '">';

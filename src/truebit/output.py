@@ -1,29 +1,44 @@
-# Shared helpers for commands that write a new audio file (repair, normalize).
+# Shared helpers for commands that write a new audio file (repair, normalize, fix).
 
 import subprocess
 from pathlib import Path
 
+from truebit.formats import COVER_ART_EXTENSIONS
 from truebit.probe import AudioError
 
-LOSSLESS_EXTENSIONS = {".flac", ".wav", ".aiff", ".aif", ".alac"}
 
-
-# Picks where to save the result: "song.flac" -> "song.repaired.flac".
-# Lossy inputs (MP3, AAC...) are saved as FLAC, so the fix itself adds no new quality loss.
-def output_path_for(input_path, label, chosen_output=None):
+# Picks where to save the result: "song.mp3" -> "song.repaired.mp3".
+# The extension is the original's unless another one is given (see formats.output_extension).
+def output_path_for(input_path, label, chosen_output=None, extension=None):
     if chosen_output is not None:
         return Path(chosen_output)
     input_path = Path(input_path)
-    extension = input_path.suffix.lower()
-    if extension not in LOSSLESS_EXTENSIONS:
-        extension = ".flac"
+    if extension is None:
+        extension = input_path.suffix.lower()
     return input_path.with_name(input_path.stem + "." + label + extension)
 
 
-# Runs FFmpeg with an audio filter chain, keeping the original sample rate
-def run_filter(input_path, output_path, filter_chain, sample_rate):
-    command = ["ffmpeg", "-v", "error", "-y", "-i", str(input_path),
-               "-af", filter_chain, "-ar", str(sample_rate), str(output_path)]
+# Runs FFmpeg: reads input_path, applies the filter chain and writes output_path with the
+# given encoder options. Keeps the tags (title, artist, album...) and, where the format
+# allows it, the cover art. tags_from = another file to copy those from (used when the
+# input is a temporary file).
+def run_filter(input_path, output_path, filter_chain, sample_rate, encoder_args, tags_from=None):
+    extension = Path(output_path).suffix.lower()
+
+    # Step 1: the inputs (the audio, and maybe a second file that has the tags)
+    command = ["ffmpeg", "-v", "error", "-y", "-i", str(input_path)]
+    tags_input = "0"
+    if tags_from is not None:
+        command = command + ["-i", str(tags_from)]
+        tags_input = "1"
+
+    # Step 2: what goes into the new file: the audio, the tags, and the cover art if any
+    command = command + ["-map", "0:a:0", "-map_metadata", tags_input]
+    if extension in COVER_ART_EXTENSIONS:
+        command = command + ["-map", tags_input + ":v?", "-c:v", "copy", "-disposition:v", "attached_pic"]
+
+    # Step 3: the filters and the encoder
+    command = command + ["-af", filter_chain, "-ar", str(sample_rate)] + encoder_args + [str(output_path)]
     result = subprocess.run(command, capture_output=True, text=True, encoding="utf-8", errors="replace")
     if result.returncode != 0:
         raise AudioError("FFmpeg failed: " + result.stderr.strip()[:300])

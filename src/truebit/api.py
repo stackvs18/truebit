@@ -20,9 +20,10 @@ from fastapi import FastAPI, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
 from truebit import __version__
+from truebit.formats import AUDIO_EXTENSIONS
 from truebit.probe import AudioError
 from truebit.quota import DailyQuota
-from truebit.report import AUDIO_EXTENSIONS, analyze_file, save_spectrogram
+from truebit.report import analyze_file, save_spectrogram
 
 MAX_UPLOAD_BYTES = 50 * 1024 * 1024  # 50 MB
 CHUNK_BYTES = 1024 * 1024
