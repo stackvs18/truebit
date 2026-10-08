@@ -33,6 +33,12 @@ def test_upload_page(client):
     assert "really lossless" in client.get("/").text
 
 
+def test_short_install_link_points_to_the_script_on_github(client):
+    response = client.get("/install.ps1", follow_redirects=False)
+    assert response.status_code == 307
+    assert response.headers["location"].endswith("/stackvs18/truebit/main/install.ps1")
+
+
 def test_analyze_finds_the_fake(client, fake_flac):
     with open(fake_flac, "rb") as file:
         response = client.post("/analyze", files={"file": ("fake.flac", file, "audio/flac")})

@@ -1,0 +1,10 @@
+# Render Blueprint: dashboard.render.com → New → Blueprint → pick this repo.
+# Render builds the Dockerfile (Python + FFmpeg) and runs the TrueBit web API.
+
+services:
+  - type: web
+    name: truebit                  # the address becomes truebit.onrender.com (or truebit-xxxx if taken)
+    runtime: docker
+    plan: free
+    region: singapore              # closest free region to India
+    healthCheckPath: /health

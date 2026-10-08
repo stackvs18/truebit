@@ -2,6 +2,7 @@
 #
 #   GET  /           a small upload page
 #   GET  /health     is the server running?
+#   GET  /install.ps1  the short install link:  irm https://<this site>/install.ps1 | iex
 #   POST /analyze    upload an audio file (max 50 MB), get the full report as JSON
 #                    ?spectrogram=true also returns the spectrogram picture (base64 PNG)
 #
@@ -16,7 +17,7 @@ from importlib import resources
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request, UploadFile
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 
 from truebit import __version__
 from truebit.probe import AudioError
@@ -25,6 +26,7 @@ from truebit.report import AUDIO_EXTENSIONS, analyze_file, save_spectrogram
 
 MAX_UPLOAD_BYTES = 50 * 1024 * 1024  # 50 MB
 CHUNK_BYTES = 1024 * 1024
+INSTALL_SCRIPT_URL = "https://raw.githubusercontent.com/stackvs18/truebit/main/install.ps1"
 
 
 # The visitor's IP address. Behind a host like Render, the real one is the first entry
@@ -76,6 +78,12 @@ def create_app(quota_database=None, daily_limit=5):
     @app.get("/health")
     def health():
         return {"status": "ok", "version": __version__}
+
+    # The short install link. It sends PowerShell on to the script on GitHub (irm follows
+    # redirects), so there is only ever one copy of the installer.
+    @app.get("/install.ps1")
+    def install_script():
+        return RedirectResponse(INSTALL_SCRIPT_URL)
 
     # Analyse one uploaded file
     @app.post("/analyze")

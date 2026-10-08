@@ -26,6 +26,17 @@
     img { width: 100%; border-radius: 12px; margin-top: 16px; }
     .note { color: var(--muted); font-size: 13px; margin-top: 18px; }
 
+    /* The one-line terminal install, with a Copy button */
+    .install { margin-top: 44px; text-align: left; }
+    .install .label { display: block; color: var(--muted); font-size: 13px; margin-bottom: 8px; }
+    .install .command { display: flex; align-items: center; gap: 12px; background: #1d1d1f; color: #f5f5f7;
+                        border-radius: 14px; padding: 14px 14px 14px 18px; }
+    .install code { flex: 1; font-family: "Geist Mono", ui-monospace, monospace; font-size: 13px;
+                    overflow-x: auto; white-space: nowrap; }
+    .install code .prompt { color: #0A84FF; }
+    .install button { font: inherit; font-size: 13px; border: 0; border-radius: 9px; padding: 7px 12px;
+                      background: #0A84FF; color: #fff; cursor: pointer; }
+
     /* The "thinking" line: bouncing equalizer bars, a shimmering verb, a timer (macOS blue) */
     .thinking { font-family: "Geist Mono", ui-monospace, monospace; font-size: 15px; color: #0A84FF; }
     .thinking .star { display: inline-block; width: 3.2em; letter-spacing: 1px; }
@@ -50,13 +61,32 @@
   </label>
 
   <div id="result"></div>
-  <p class="note">Or from the terminal: <code>irm https://raw.githubusercontent.com/stackvs18/truebit/main/install.ps1 | iex</code></p>
+  <div class="install">
+    <span class="label">Or get the terminal app (Windows PowerShell): scan a whole library, repair, normalize, compare</span>
+    <div class="command">
+      <code><span class="prompt">&gt;</span> <span id="install-command">irm https://raw.githubusercontent.com/stackvs18/truebit/main/install.ps1 | iex</span></code>
+      <button type="button" id="copy-install">Copy</button>
+    </div>
+  </div>
 </main>
 
 <script>
   var drop = document.getElementById("drop");
   var fileInput = document.getElementById("file");
   var resultBox = document.getElementById("result");
+
+  // The install command uses this site's own short link, e.g. irm https://truebit.onrender.com/install.ps1 | iex
+  var installCommand = document.getElementById("install-command");
+  if (location.protocol === "https:") {
+    installCommand.textContent = "irm " + location.origin + "/install.ps1 | iex";
+  }
+  document.getElementById("copy-install").addEventListener("click", function () {
+    var button = this;
+    navigator.clipboard.writeText(installCommand.textContent).then(function () {
+      button.textContent = "Copied";
+      setTimeout(function () { button.textContent = "Copy"; }, 1500);
+    });
+  });
 
   // Puts text into HTML safely
   function escapeText(text) {
