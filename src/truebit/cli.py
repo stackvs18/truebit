@@ -36,7 +36,7 @@ from truebit.ui import (
     welcome,
 )
 
-app = typer.Typer(help="TrueBit: catch fake lossless and fake 320 kbps audio.",
+app = typer.Typer(help="TrueBit: is your audio really lossless? Check, fix and tag any audio file.",
                   add_completion=False, invoke_without_command=True)
 
 VERDICT_COLORS = {"lossless": GREEN, "lossy": YELLOW, "fake_lossless": RED, "fake_bitrate": RED}

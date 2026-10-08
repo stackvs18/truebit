@@ -8,6 +8,8 @@ irm https://raw.githubusercontent.com/stackvs18/truebit/main/install.ps1 | iex
 
 ![truebit check](docs/check.png)
 
+**Contents:** [Install](#install) · [Use it](#use-it) · [Command reference](#command-reference) · [Says, stores, really](#says-stores-really-the-bitrate-truth) · [Fix](#fix-noisy-clipped-and-fake-upscaled-audio) · [Tags](#tags-see-and-change-the-metadata) · [How detection works](#how-detection-works) · [Repair, normalize, compare](#repair-normalize-and-compare) · [Results](#results) · [Web API](#web-api) · [Architecture](#architecture) · [Develop](#develop)
+
 ---
 
 ## Why
@@ -80,7 +82,7 @@ truebit › fix fake_320.mp3
 truebit › exit
 ```
 
-Every command also works directly:
+Every command also works directly (all the options are in the [command reference](#command-reference)):
 
 | Command | What it does |
 |---|---|
@@ -102,6 +104,129 @@ Verdicts: **GENUINE LOSSLESS** · **FAKE LOSSLESS: upscaled from ~128 kbps** · 
 **Writes back in the same format:** FLAC, WAV, AIFF, ALAC, MP3, M4A/AAC, OGG, Opus, WMA, keeping the tags and cover art. Formats TrueBit can't write become FLAC (lossless ones) or M4A (lossy ones).
 
 While it works, an animated **equalizer** bounces in macOS blue next to a shimmering verb that changes every 2 seconds (*Sniffing for brickwalls, Interrogating the Nyquist, Bribing the FFT…*) and a live timer. The analysis runs in a background thread while `rich.live.Live` redraws the line 20 times a second.
+
+---
+
+## Command reference
+
+Every command also works inside the interactive `truebit ›` prompt (just leave out the word `truebit`). Put paths with spaces in quotes. `truebit COMMAND --help` shows the same list in the terminal.
+
+### `truebit check FILE`
+Is the file lossless? What its bitrate says, what it stores and what it's really worth; format, encoder, CBR/VBR, tags, cover art, loudness, clipping, noise and a band chart with the cliff.
+
+| Option | What it does |
+|---|---|
+| `--save` | Also save `NAME.truebit.json` and `NAME.spectrogram.png` into `./truebit-reports/` |
+
+```powershell
+truebit check "song.flac"
+truebit check "song.mp3" --save
+```
+
+### `truebit scan FOLDER`
+Checks every audio file in a folder and its sub-folders: a table with Format, Says, Stores, Really and Verdict, and a count of genuine lossless, fake and lossy files.
+
+| Option | What it does |
+|---|---|
+| `--json FILE` | Save every report into one JSON file |
+
+```powershell
+truebit scan "D:\Music"
+truebit scan "D:\Music" --json library.json
+```
+
+### `truebit fix FILE-or-FOLDER`
+Rebuilds clipped peaks (if at least 1 sample in 1,000 is clipped), turns down background hiss, re-encodes fakes at their honest bitrate and normalizes the loudness. The originals are never changed.
+
+| Option | Default | What it does |
+|---|---|---|
+| `--target LUFS` | `-14` | Loudness target: −14 Spotify/YouTube, −16 Apple, −23 broadcast |
+| `--strength light/medium/strong` | `light` | How hard to turn down hiss, when hiss is found (6 / 12 / 20 dB) |
+| `--format FORMAT` | each file's own | Save everything as one format: `mp3`, `m4a`, `aac`, `flac`, `wav`, `aiff`, `ogg`, `opus`, `wma` (fake FLACs become MP3 unless you choose) |
+| `-o, --output-folder FOLDER` | `truebit-fixed` | Where the fixed files go |
+
+```powershell
+truebit fix "D:\Music"
+truebit fix "song.flac" --target -16 --format m4a -o "D:\Fixed"
+```
+
+### `truebit tags FILE-or-FOLDER`
+With no options: every tag and the cover art (on a folder, a table of title / artist / album / year / track / cover). With options: changes the tags **permanently**, rewriting only the tag, never the audio. It asks before changing anything.
+
+| Option | What it does |
+|---|---|
+| `--set NAME=VALUE` | Set a tag; repeat for more. Names: `title`, `artist`, `album`, `albumartist`, `year`, `genre`, `track` (`3` or `3/12`), `disc`, `composer`, `comment`, or any custom name |
+| `--remove NAME` | Remove a tag; repeat for more |
+| `--clear` | Remove every tag and the cover art |
+| `--cover PICTURE` | New cover art (`.jpg` or `.png`) |
+| `--remove-cover` | Take the cover art out |
+| `--save-cover PICTURE` | Save the cover art as a picture file (one file) |
+| `-o, --output FILE` | Change a copy instead of the original (one file; doesn't ask) |
+| `-y, --yes` | Don't ask before changing files |
+
+```powershell
+truebit tags "song.mp3"
+truebit tags "song.mp3" --set title="Don't Stop" --set year=2024 --set track=3/12 --remove comment
+truebit tags "song.m4a" --cover "art.jpg"
+truebit tags "song.flac" --save-cover "cover.jpg"
+truebit tags "D:\Music\Album" --set album="Best Of" --set albumartist="Various" --yes
+truebit tags "song.mp3" --clear --output "clean.mp3"
+```
+
+### `truebit compare A B`
+Which of two copies is genuinely better: genuine lossless first, then the higher real cutoff, then fewer clipped samples.
+
+| Option | What it does |
+|---|---|
+| `--json FILE` | Save both reports and the result |
+
+```powershell
+truebit compare "a.flac" "b.mp3"
+```
+
+### `truebit repair FILE`
+Rebuilds clipped peaks, removes clicks, turns down hiss, then a limiter; shows a before/after table.
+
+| Option | Default | What it does |
+|---|---|---|
+| `--strength light/medium/strong` | `medium` | Noise reduction: 6 / 12 / 20 dB |
+| `--no-declip` | | Skip rebuilding clipped peaks |
+| `--no-declick` | | Skip click and crackle removal |
+| `--no-denoise` | | Skip hiss reduction |
+| `--format FORMAT` | the original's | Save as another format |
+| `-o, --output FILE` | `NAME.repaired.EXT` | Where to save |
+
+```powershell
+truebit repair "old_recording.wav" --strength strong --no-declick
+```
+
+### `truebit normalize FILE`
+Two-pass EBU R128: measure, then one exact gain change, with the true peak capped at −1 dBTP.
+
+| Option | Default | What it does |
+|---|---|---|
+| `--preset spotify/youtube/apple/broadcast` | `spotify` | −14 / −14 / −16 / −23 LUFS |
+| `--target LUFS` | | Any target, e.g. `-12` (overrides `--preset`) |
+| `--format FORMAT` | the original's | Save as another format |
+| `-o, --output FILE` | `NAME.normalized-14.EXT` | Where to save |
+
+```powershell
+truebit normalize "song.flac" --preset apple
+truebit normalize "song.mp3" --target -12 --format m4a
+```
+
+### `truebit serve`
+The web upload page and JSON API (5 analyses per IP per day).
+
+| Option | Default | What it does |
+|---|---|---|
+| `--host HOST` | `127.0.0.1` | `0.0.0.0` lets other devices on your Wi-Fi open it |
+| `--port PORT` | `8000` | The port |
+
+### Also
+- `truebit version`: the installed version.
+- `truebit --help`, `truebit COMMAND --help`: every option in the terminal.
+- In the `truebit ›` prompt: `help`, `clear`, `exit` (or `quit`); a dragged-in **file** is checked, a **folder** is scanned.
 
 ---
 
@@ -446,6 +571,8 @@ The tests generate real audio with FFmpeg (pink noise, MP3 encodes, fakes, clipp
 - `check` and `scan` decode only the first 120 s of each file for the spectrum, peaks and clipping (plenty for the cutoff, and fast); LUFS and true peak cover the whole file.
 - The web quota is per IP, so people on the same Wi-Fi share it.
 - Repair can't restore frequencies an encoder deleted. Nothing can.
+- Re-saving a lossy file (repair, normalize, fix) re-encodes it at its bitrate or higher: a tiny extra loss you can't hear. Tag edits never re-encode.
+- Cover art can be read but not yet changed in WMA and APE files; raw `.aac` files can't hold tags at all.
 
 **Next steps**
 1. A machine-learning classifier: encode lossless clips at 128/192/256/320 kbps (free labels), train on band energies, and report a confidence next to the rule-based verdict.
