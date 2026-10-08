@@ -1,121 +1,124 @@
-# The `truebit` command.
+# The `truebit` command, styled like Claude Code.
 #
-#   truebit check song.flac          analyse one file: verdict, spectrum bands, loudness
-#   truebit scan "D:\Music"          analyse a whole folder and show a table
-#   truebit scan "D:\Music" --json report.json
+#   truebit                          welcome screen
+#   truebit check song.flac          real or fake? verdict, spectrum bands, loudness
+#   truebit scan "D:\Music"          a whole folder (add --json report.json to save)
 #   truebit compare a.flac b.mp3     which copy is genuinely better?
 #   truebit repair song.wav          fix clipping, clicks and background noise
 #   truebit normalize song.flac      set loudness to -14 LUFS (Spotify) or another target
 #   truebit serve                    web API and upload page
 
 import json
-import random
-import time
-from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import typer
-from rich.console import Console
-from rich.panel import Panel
+from rich.box import ROUNDED
 from rich.table import Table
 from rich.text import Text
 
 from truebit import __version__
 from truebit.probe import AudioError
 from truebit.report import analyze_file, find_audio_files, save_report, save_spectrogram
+from truebit.ui import (CLAUDE_ORANGE, DIM, GREEN, RED, YELLOW, console, format_size,
+                        indented, run_with_spinner, tool_call, tool_result, welcome)
 
-app = typer.Typer(help="TrueBit: catch fake lossless and fake 320 kbps audio.", add_completion=False)
-console = Console()
+app = typer.Typer(help="TrueBit: catch fake lossless and fake 320 kbps audio.",
+                  add_completion=False, invoke_without_command=True)
 
-# Shown while the analysis runs, like Claude Code's spinner words
-SPINNER_VERBS = [
-    "Untangling waveforms", "Interrogating the Nyquist", "Sniffing for brickwalls",
-    "Counting lost harmonics", "Bribing the FFT", "Listening very carefully",
-    "Measuring the loudness war", "Squinting at 16 kHz", "Asking the encoder nicely",
-]
-
-VERDICT_STYLES = {
-    "lossless": "bold green",
-    "lossy": "bold yellow",
-    "fake_lossless": "bold red",
-    "fake_bitrate": "bold red",
-}
+VERDICT_COLORS = {"lossless": GREEN, "lossy": YELLOW, "fake_lossless": RED, "fake_bitrate": RED}
 
 
-# Runs the analysis in the background while the spinner shows changing words
-def analyze_with_spinner(file_path):
-    with ThreadPoolExecutor(max_workers=1) as pool:
-        future = pool.submit(analyze_file, file_path)
-        with console.status(random.choice(SPINNER_VERBS) + "…", spinner="dots") as status:
-            while not future.done():
-                time.sleep(0.6)
-                status.update(random.choice(SPINNER_VERBS) + "…")
-        return future.result()
+# `truebit` on its own shows the welcome box
+@app.callback()
+def main(context: typer.Context):
+    if context.invoked_subcommand is None:
+        welcome(__version__, Path.cwd())
+
+
+# Stops with a red message (used when a file can't be read)
+def fail(message):
+    tool_result(message, style=RED)
+    raise typer.Exit(1)
 
 
 # A bar chart of the high-frequency bands; the cliff shows as bars suddenly disappearing
 def bands_chart(spectrum):
-    text = Text()
+    chart = Text()
     for band in spectrum["bands"]:
         level = band["level_db"]
-        label = f"{band['from_hz'] / 1000:>5.1f}-{band['to_hz'] / 1000:<5.1f} kHz "
-        bar_length = max(0, int((level + 120) / 2.5))  # -120 dB = empty, -20 dB = full
-        text.append(label, style="dim")
+        chart.append(f"     {band['from_hz'] / 1000:>4.1f}–{band['to_hz'] / 1000:<4.1f} kHz  ", style=DIM)
         if level <= -200:
-            text.append("silent", style="red")
+            chart.append("silent", style=RED)
         else:
-            text.append("█" * bar_length, style="cyan")
-            text.append(f" {level:.0f} dB", style="dim")
+            bar_length = max(0, int((level + 120) / 2.5))  # -120 dB = empty, -20 dB = full
+            chart.append("█" * bar_length, style=CLAUDE_ORANGE)
+            chart.append(f" {level:.0f} dB", style=DIM)
         if spectrum["cutoff_hz"] and band["from_hz"] <= spectrum["cutoff_hz"] < band["to_hz"]:
-            text.append("  ← cliff", style="bold red")
-        text.append("\n")
-    return text
+            chart.append("  ← cliff", style="bold " + RED)
+        chart.append("\n")
+    return chart
 
 
-# Prints the full result for one file
-def print_report(report, file_path):
+# Prints one file's report as tool results
+def print_report(report):
     file_info = report["file"]
     spectrum = report["spectrum"]
     loudness = report["loudness"]
+    color = VERDICT_COLORS.get(report["verdict"], "")
 
-    style = VERDICT_STYLES.get(report["verdict"], "bold")
-    console.print(Panel(Text(report["verdict_headline"], style=style) + Text("\n\n" + report["verdict_detail"]),
-                        title=f"[bold]{Path(file_path).name}[/]", border_style=style.split()[-1], padding=(1, 2)))
-
-    details = Table(show_header=False, box=None, padding=(0, 2))
-    details.add_column(style="dim")
-    details.add_column()
-    bitrate = f"{file_info['bitrate_kbps']} kbps" if file_info["bitrate_kbps"] else "—"
-    details.add_row("Format", f"{file_info['codec'].upper()} in {file_info['container']} · {bitrate}")
-    details.add_row("Sample rate", f"{file_info['sample_rate_hz']:,} Hz · {file_info['channels']} channels"
-                    + (f" · {file_info['bit_depth']}-bit" if file_info["bit_depth"] else ""))
-    details.add_row("Duration", f"{file_info['duration_seconds']:.1f} s")
-    cutoff = f"{spectrum['cutoff_hz'] / 1000:.2f} kHz (drop {spectrum['cutoff_drop_db']} dB)" if spectrum["cutoff_hz"] else "none (full band)"
-    details.add_row("Cutoff", cutoff)
-    details.add_row("Loudness", f"{loudness['integrated_lufs']} LUFS · true peak {loudness['true_peak_dbtp']} dBTP"
-                    f" · crest {loudness['crest_factor_db']} dB · {loudness['clipped_samples']} clipped samples")
-    console.print(details)
+    tool_result(report["verdict_headline"], style="bold " + color)
+    indented(report["verdict_detail"])
     console.print()
-    console.print(bands_chart(spectrum))
+
+    bitrate = f"{file_info['bitrate_kbps']} kbps" if file_info["bitrate_kbps"] else "?"
+    depth = f" · {file_info['bit_depth']}-bit" if file_info["bit_depth"] else ""
+    if spectrum["cutoff_hz"]:
+        cutoff = f"{spectrum['cutoff_hz'] / 1000:.2f} kHz (drop {spectrum['cutoff_drop_db']} dB)"
+    else:
+        cutoff = "none, sound reaches the top"
+    rows = [
+        ("Format", f"{file_info['codec'].upper()} · {bitrate}"),
+        ("Sample rate", f"{file_info['sample_rate_hz']:,} Hz · {file_info['channels']} ch{depth}"),
+        ("Duration", f"{file_info['duration_seconds']:.1f} s"),
+        ("Cutoff", cutoff),
+        ("Loudness", f"{loudness['integrated_lufs']} LUFS · true peak {loudness['true_peak_dbtp']} dBTP"),
+        ("Clipping", f"{loudness['clipped_samples']} clipped samples · crest {loudness['crest_factor_db']} dB"),
+    ]
+    for label, value in rows:
+        console.print(Text(f"     {label:<12} ", style=DIM) + Text(value))
+    console.print()
+    console.print(bands_chart(spectrum), end="")
 
 
 @app.command()
 def check(file: Path = typer.Argument(..., exists=True, dir_okay=False, help="Audio file to analyse."),
           spectrogram: bool = typer.Option(True, help="Also save a spectrogram PNG.")):
-    """Analyse one audio file."""
+    """Is this file really what it claims to be?"""
+    tool_call("Check", file.name)
     try:
-        report = analyze_with_spinner(file)
+        report = run_with_spinner(analyze_file, file, detail=format_size(file.stat().st_size))
     except AudioError as error:
-        console.print(f"[red]{error}[/]")
-        raise typer.Exit(1)
+        fail(str(error))
 
-    print_report(report, file)
+    print_report(report)
     json_path = save_report(report, file)
-    console.print(f"[dim]Report saved: {json_path}[/]")
+    console.print()
+    tool_call("Write", str(json_path))
     if spectrogram:
         image_path = save_spectrogram(file)
         if image_path is not None:
-            console.print(f"[dim]Spectrogram saved: {image_path}[/]")
+            tool_call("Write", str(image_path))
+
+
+# Analyses every file in a list, one by one (run inside the spinner)
+def analyze_many(file_list):
+    reports = {}
+    for file_path in file_list:
+        try:
+            reports[str(file_path)] = analyze_file(file_path)
+        except AudioError as error:
+            reports[str(file_path)] = {"error": str(error)}
+    return reports
 
 
 @app.command()
@@ -123,53 +126,57 @@ def scan(folder: Path = typer.Argument(..., exists=True, file_okay=False, help="
          json_out: Path = typer.Option(None, "--json", help="Save all reports to this JSON file.")):
     """Analyse every audio file in a folder (and its sub-folders)."""
     audio_files = find_audio_files(folder)
+    tool_call("Scan", str(folder))
     if len(audio_files) == 0:
-        console.print("No audio files found.")
+        tool_result("No audio files found.")
         return
 
-    table = Table(header_style="bold cyan")
+    reports = run_with_spinner(analyze_many, audio_files, detail=f"{len(audio_files)} files")
+
+    table = Table(box=ROUNDED, border_style=DIM, header_style="bold")
     table.add_column("File")
     table.add_column("Format")
     table.add_column("Cutoff", justify="right")
     table.add_column("Verdict")
-
-    all_reports = {}
     fake_count = 0
-    start_time = time.perf_counter()
-    with console.status("Scanning…", spinner="dots") as status:
-        for number, file_path in enumerate(audio_files, start=1):
-            status.update(f"{random.choice(SPINNER_VERBS)}… ({number}/{len(audio_files)}) {file_path.name}")
-            try:
-                report = analyze_file(file_path)
-            except AudioError as error:
-                table.add_row(file_path.name, "—", "—", f"[red]error: {error}[/]")
-                continue
-            all_reports[str(file_path)] = report
-            if report["verdict"].startswith("fake"):
-                fake_count = fake_count + 1
-            cutoff = report["spectrum"]["cutoff_hz"]
-            style = VERDICT_STYLES.get(report["verdict"], "")
-            table.add_row(file_path.name, report["file"]["codec"].upper(),
-                          f"{cutoff / 1000:.1f} kHz" if cutoff else "full",
-                          f"[{style}]{report['verdict_headline']}[/]")
-
-    seconds = time.perf_counter() - start_time
+    for file_path in audio_files:
+        report = reports[str(file_path)]
+        if "error" in report:
+            table.add_row(file_path.name, "—", "—", f"[{RED}]{report['error']}[/]")
+            continue
+        if report["verdict"].startswith("fake"):
+            fake_count = fake_count + 1
+        cutoff = report["spectrum"]["cutoff_hz"]
+        color = VERDICT_COLORS.get(report["verdict"], "")
+        table.add_row(file_path.name, report["file"]["codec"].upper(),
+                      f"{cutoff / 1000:.1f} kHz" if cutoff else "full",
+                      f"[{color}]{report['verdict_headline']}[/]")
     console.print(table)
-    console.print(f"{len(audio_files)} files in {seconds:.1f} s · [bold red]{fake_count} fake[/]")
+    tool_result(f"{len(audio_files)} files · {fake_count} fake", style="bold")
     if json_out is not None:
-        json_out.write_text(json.dumps(all_reports, indent=2), encoding="utf-8")
-        console.print(f"[dim]Saved {json_out}[/]")
+        json_out.write_text(json.dumps(reports, indent=2), encoding="utf-8")
+        tool_call("Write", str(json_out))
 
 
-# One row of a before/after table, coloured green when the number improved
+# One row of a before/after table, green when the number improved
 def add_change_row(table, label, before_value, after_value, unit, lower_is_better=True):
     if before_value is None or after_value is None:
         table.add_row(label, str(before_value), str(after_value), "")
         return
     improved = after_value < before_value if lower_is_better else after_value > before_value
-    style = "green" if improved else "dim"
-    table.add_row(label, f"{before_value:g}{unit}", f"[{style}]{after_value:g}{unit}[/]",
-                  f"[{style}]{after_value - before_value:+.1f}{unit}[/]")
+    color = GREEN if improved else DIM
+    table.add_row(label, f"{before_value:g}{unit}", f"[{color}]{after_value:g}{unit}[/]",
+                  f"[{color}]{after_value - before_value:+.1f}{unit}[/]")
+
+
+# An empty before/after table
+def before_after_table():
+    table = Table(box=ROUNDED, border_style=DIM, header_style="bold")
+    table.add_column("")
+    table.add_column("Before", justify="right")
+    table.add_column("After", justify="right")
+    table.add_column("Change", justify="right")
+    return table
 
 
 @app.command()
@@ -182,24 +189,21 @@ def repair(file: Path = typer.Argument(..., exists=True, dir_okay=False, help="A
     """Repair clipping, clicks and background noise (saves a new file)."""
     from truebit.repair import repair_file
 
+    tool_call("Repair", f"{file.name}, strength={strength}")
     try:
-        with console.status("Rebuilding clipped peaks, removing clicks, hushing the hiss...", spinner="dots"):
-            output_path, before, after = repair_file(file, output, declick, declip, denoise, strength)
+        output_path, before, after = run_with_spinner(repair_file, file, output, declick, declip,
+                                                      denoise, strength,
+                                                      detail=format_size(file.stat().st_size))
     except (AudioError, ValueError) as error:
-        console.print(f"[red]{error}[/]")
-        raise typer.Exit(1)
+        fail(str(error))
 
-    table = Table(title=f"Repaired {file.name}", header_style="bold cyan")
-    table.add_column("")
-    table.add_column("Before", justify="right")
-    table.add_column("After", justify="right")
-    table.add_column("Change", justify="right")
+    table = before_after_table()
     add_change_row(table, "Clipped samples", before["clipped_samples"], after["clipped_samples"], "")
     add_change_row(table, "Background noise", before["noise_floor_dbfs"], after["noise_floor_dbfs"], " dB")
     add_change_row(table, "True peak", before["true_peak_dbtp"], after["true_peak_dbtp"], " dBTP")
     console.print(table)
-    console.print(f"[green]Saved:[/] {output_path}")
-    console.print("[dim]Note: repair fixes damage. It cannot bring back frequencies an MP3 encoder deleted.[/]")
+    tool_call("Write", str(output_path))
+    tool_result("Repair fixes damage. It cannot bring back frequencies an MP3 encoder deleted.", style=DIM)
 
 
 @app.command()
@@ -212,34 +216,31 @@ def normalize(file: Path = typer.Argument(..., exists=True, dir_okay=False, help
 
     if target is None:
         if preset not in PRESETS:
-            console.print("[red]Presets: " + ", ".join(PRESETS) + "[/]")
-            raise typer.Exit(1)
+            fail("Presets: " + ", ".join(PRESETS))
         target = PRESETS[preset]
 
+    tool_call("Normalize", f"{file.name}, target={target:g} LUFS")
     try:
-        with console.status(f"Measuring loudness, then setting it to {target:g} LUFS...", spinner="dots"):
-            output_path, before, after = normalize_file(file, target, output)
+        output_path, before, after = run_with_spinner(normalize_file, file, target, output,
+                                                      detail=format_size(file.stat().st_size))
     except AudioError as error:
-        console.print(f"[red]{error}[/]")
-        raise typer.Exit(1)
+        fail(str(error))
 
-    table = Table(title=f"Normalized {file.name} to {target:g} LUFS", header_style="bold cyan")
-    table.add_column("")
-    table.add_column("Before", justify="right")
-    table.add_column("After", justify="right")
-    table.add_column("Change", justify="right")
-    table.add_row("Loudness", f"{before['integrated_lufs']:g} LUFS", f"{after['integrated_lufs']:g} LUFS",
-                  f"{after['integrated_lufs'] - before['integrated_lufs']:+.1f} dB")
+    table = before_after_table()
+    change = after["integrated_lufs"] - before["integrated_lufs"]
+    table.add_row("Loudness", f"{before['integrated_lufs']:g} LUFS", f"[{GREEN}]{after['integrated_lufs']:g} LUFS[/]",
+                  f"{change:+.1f} dB")
     table.add_row("True peak", f"{before['true_peak_dbtp']:g} dBTP", f"{after['true_peak_dbtp']:g} dBTP", "")
     console.print(table)
-    console.print(f"[green]Saved:[/] {output_path}")
+    tool_call("Write", str(output_path))
 
 
 # One cell of the compare table
 def compare_cell(report, kind):
     file_info = report["file"]
     if kind == "verdict":
-        return f"[{VERDICT_STYLES.get(report['verdict'], '')}]{report['verdict_headline']}[/]"
+        color = VERDICT_COLORS.get(report["verdict"], "")
+        return f"[{color}]{report['verdict_headline']}[/]"
     if kind == "format":
         return f"{file_info['codec'].upper()} · {file_info['bitrate_kbps'] or '?'} kbps"
     if kind == "cutoff":
@@ -254,17 +255,6 @@ def compare_cell(report, kind):
     return ""
 
 
-# Runs a two-file job in the background while the spinner shows changing words
-def run_pair_with_spinner(first, second, job):
-    with ThreadPoolExecutor(max_workers=1) as pool:
-        future = pool.submit(job, first, second)
-        with console.status(random.choice(SPINNER_VERBS) + "...", spinner="dots") as status:
-            while not future.done():
-                time.sleep(0.6)
-                status.update(random.choice(SPINNER_VERBS) + "...")
-        return future.result()
-
-
 @app.command()
 def compare(first: Path = typer.Argument(..., exists=True, dir_okay=False),
             second: Path = typer.Argument(..., exists=True, dir_okay=False),
@@ -272,39 +262,36 @@ def compare(first: Path = typer.Argument(..., exists=True, dir_okay=False),
     """Which of two copies of a song is genuinely better?"""
     from truebit.compare import compare_files
 
+    tool_call("Compare", f"{first.name}, {second.name}")
     try:
-        result = run_pair_with_spinner(first, second, compare_files)
+        result = run_with_spinner(compare_files, first, second, detail="2 files")
     except AudioError as error:
-        console.print(f"[red]{error}[/]")
-        raise typer.Exit(1)
+        fail(str(error))
 
-    table = Table(header_style="bold cyan")
+    table = Table(box=ROUNDED, border_style=DIM, header_style="bold")
     table.add_column("")
     for side in ["first", "second"]:
         name = result[side]["file"]
         if name == result["winner"]:
-            table.add_column(f"[bold green]{name}[/]", justify="right")
+            table.add_column(f"[{GREEN}]{name} ✓[/]", justify="right")
         else:
             table.add_column(name, justify="right")
-
-    first_report = result["first"]["report"]
-    second_report = result["second"]["report"]
     rows = [("Verdict", "verdict"), ("Format", "format"), ("Real cutoff", "cutoff"),
             ("Loudness", "loudness"), ("Clipped samples", "clipping")]
     for label, kind in rows:
-        table.add_row(label, compare_cell(first_report, kind), compare_cell(second_report, kind))
+        table.add_row(label, compare_cell(result["first"]["report"], kind),
+                      compare_cell(result["second"]["report"], kind))
     console.print(table)
 
     if result["winner"] is None:
-        console.print(Panel(result["reason"], border_style="yellow"))
+        tool_result(result["reason"], style=YELLOW)
     else:
-        message = Text("Keep " + result["winner"], style="bold green") + Text("\n" + result["reason"])
-        console.print(Panel(message, border_style="green"))
+        tool_result(f"Keep {result['winner']}. {result['reason']}", style="bold " + GREEN)
     if result["warning"]:
-        console.print(f"[yellow]{result['warning']}[/]")
+        tool_result(result["warning"], style=YELLOW)
     if json_out is not None:
         json_out.write_text(json.dumps(result, indent=2), encoding="utf-8")
-        console.print(f"[dim]Saved {json_out}[/]")
+        tool_call("Write", str(json_out))
 
 
 @app.command()
@@ -315,11 +302,12 @@ def serve(host: str = typer.Option("127.0.0.1", help="Use 0.0.0.0 to allow other
 
     from truebit.api import create_app
 
-    console.print(f"TrueBit API on http://{host}:{port}  (docs: http://{host}:{port}/docs)")
+    tool_call("Serve", f"http://{host}:{port}")
+    tool_result(f"Upload page: http://{host}:{port}   ·   API docs: http://{host}:{port}/docs", style=DIM)
     uvicorn.run(create_app(), host=host, port=port, log_level="warning")
 
 
 @app.command()
 def version():
     """Show the version."""
-    console.print("truebit " + __version__)
+    console.print(f"truebit {__version__}")

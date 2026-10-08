@@ -25,6 +25,17 @@
     td:first-child { color: var(--muted); width: 38%; }
     img { width: 100%; border-radius: 12px; margin-top: 16px; }
     .note { color: var(--muted); font-size: 13px; margin-top: 18px; }
+
+    /* The Claude Code style "thinking" line: a changing star, a shimmering verb, a timer */
+    .thinking { font-family: "Geist Mono", ui-monospace, monospace; font-size: 15px; color: #D77757; }
+    .thinking .star { display: inline-block; width: 1.2em; }
+    .thinking .verb {
+      background: linear-gradient(90deg, #D77757 0%, #D77757 40%, #F4C6B3 50%, #D77757 60%, #D77757 100%);
+      background-size: 300% 100%; -webkit-background-clip: text; background-clip: text; color: transparent;
+      animation: shimmer 1.6s linear infinite;
+    }
+    .thinking .meta { color: #8a8a8a; }
+    @keyframes shimmer { from { background-position: 100% 0; } to { background-position: 0% 0; } }
   </style>
 </head>
 <body>
@@ -54,40 +65,114 @@
     return element.innerHTML;
   }
 
-  // Sends the file to /analyze and shows the answer
+  // ---- The animated "thinking" line (like Claude Code) -------------------------------
+  var STAR_FRAMES = ["·", "✢", "✳", "✶", "✻", "✽", "✻", "✶", "✳", "✢"];
+  var VERBS = ["Pollinating", "Sniffing for brickwalls", "Interrogating the Nyquist",
+    "Untangling waveforms", "Counting lost harmonics", "Bribing the FFT", "Squinting at 16 kHz",
+    "Listening very carefully", "Chasing the cliff", "Welching the spectrum", "Herding decibels"];
+  var thinkingTimer = null;
+
+  // "8s", "1m 05s"
+  function formatElapsed(seconds) {
+    if (seconds < 60) { return seconds + "s"; }
+    var rest = seconds % 60;
+    return Math.floor(seconds / 60) + "m " + (rest < 10 ? "0" : "") + rest + "s";
+  }
+
+  // Starts the animation. getDetail() returns the text after the timer (e.g. "uploading 45%").
+  function startThinking(getDetail) {
+    stopThinking();
+    var startedAt = Date.now();
+    var verb = VERBS[Math.floor(Math.random() * VERBS.length)];
+    var verbChangedAt = startedAt;
+    resultBox.innerHTML = '<div class="result thinking"><span class="star"></span>'
+      + '<span class="verb"></span><span class="meta"></span></div>';
+    var starElement = resultBox.querySelector(".star");
+    var verbElement = resultBox.querySelector(".verb");
+    var metaElement = resultBox.querySelector(".meta");
+
+    thinkingTimer = setInterval(function () {
+      var now = Date.now();
+      // A new verb every 2 seconds (never the same one twice in a row)
+      if (now - verbChangedAt >= 2000) {
+        var nextVerb = verb;
+        while (nextVerb === verb) { nextVerb = VERBS[Math.floor(Math.random() * VERBS.length)]; }
+        verb = nextVerb;
+        verbChangedAt = now;
+      }
+      starElement.textContent = STAR_FRAMES[Math.floor((now - startedAt) / 100) % STAR_FRAMES.length];
+      verbElement.textContent = verb + "…";
+      metaElement.textContent = " (" + formatElapsed(Math.floor((now - startedAt) / 1000)) + " · " + getDetail() + ")";
+    }, 80);
+  }
+
+  function stopThinking() {
+    if (thinkingTimer !== null) { clearInterval(thinkingTimer); thinkingTimer = null; }
+  }
+
+  // "4.2 MB"
+  function formatSize(bytes) {
+    if (bytes < 1024 * 1024) { return Math.round(bytes / 1024) + " KB"; }
+    return (bytes / 1024 / 1024).toFixed(1) + " MB";
+  }
+
+  // Sends the file to /analyze and shows the answer.
+  // XMLHttpRequest (not fetch) because it can report upload progress.
   function analyze(file) {
-    resultBox.innerHTML = '<div class="result">Listening very carefully…</div>';
+    var detailText = "uploading 0%";
+    startThinking(function () { return detailText; });
+
     var formData = new FormData();
     formData.append("file", file);
+    var request = new XMLHttpRequest();
+    request.open("POST", "/analyze?spectrogram=true");
 
-    fetch("/analyze?spectrogram=true", { method: "POST", body: formData })
-      .then(function (response) {
-        return response.json().then(function (data) { return { ok: response.ok, data: data }; });
-      })
-      .then(function (answer) {
-        if (!answer.ok) {
-          resultBox.innerHTML = '<div class="result">' + escapeText(answer.data.detail || answer.data.error) + "</div>";
-          return;
-        }
-        var report = answer.data;
-        var colour = report.verdict.indexOf("fake") === 0 ? "fake" : (report.verdict === "lossless" ? "real" : "lossy");
-        var cutoff = report.spectrum.cutoff_hz ? (report.spectrum.cutoff_hz / 1000).toFixed(2) + " kHz" : "none (full band)";
-        var html = '<div class="result">'
-          + '<p class="verdict ' + colour + '">' + escapeText(report.verdict_headline) + "</p>"
-          + '<p class="detail">' + escapeText(report.verdict_detail) + "</p><table>"
-          + "<tr><td>Format</td><td>" + escapeText(report.file.codec.toUpperCase() + " · " + (report.file.bitrate_kbps || "?") + " kbps") + "</td></tr>"
-          + "<tr><td>Sample rate</td><td>" + escapeText(report.file.sample_rate_hz + " Hz") + "</td></tr>"
-          + "<tr><td>Cutoff</td><td>" + escapeText(cutoff) + "</td></tr>"
-          + "<tr><td>Loudness</td><td>" + escapeText(report.loudness.integrated_lufs + " LUFS · true peak " + report.loudness.true_peak_dbtp + " dBTP") + "</td></tr>"
-          + "</table>";
-        if (report.spectrogram_png_base64) {
-          html = html + '<img alt="Spectrogram" src="data:image/png;base64,' + report.spectrogram_png_base64 + '">';
-        }
-        resultBox.innerHTML = html + "</div>";
-      })
-      .catch(function () {
-        resultBox.innerHTML = '<div class="result">Something went wrong. Try again.</div>';
-      });
+    request.upload.onprogress = function (event) {
+      if (event.lengthComputable) {
+        detailText = "uploading " + Math.round(event.loaded / event.total * 100) + "%";
+      }
+    };
+    request.upload.onload = function () {
+      detailText = formatSize(file.size) + " · analysing";
+    };
+    request.onerror = function () {
+      stopThinking();
+      resultBox.innerHTML = '<div class="result">Something went wrong. Try again.</div>';
+    };
+    request.onload = function () {
+      stopThinking();
+      var data = {};
+      try { data = JSON.parse(request.responseText); } catch (error) { data = { error: "Unexpected answer" }; }
+      showAnswer({ ok: request.status === 200, data: data });
+    };
+    request.send(formData);
+  }
+
+  // Shows the report (or the error) after the analysis
+  function showAnswer(answer) {
+    if (!answer.ok) {
+      resultBox.innerHTML = '<div class="result">' + escapeText(answer.data.detail || answer.data.error) + "</div>";
+      return;
+    }
+    var report = answer.data;
+    var colour = "lossy";
+    if (report.verdict.indexOf("fake") === 0) { colour = "fake"; }
+    if (report.verdict === "lossless") { colour = "real"; }
+    var cutoff = "none (full band)";
+    if (report.spectrum.cutoff_hz) { cutoff = (report.spectrum.cutoff_hz / 1000).toFixed(2) + " kHz"; }
+
+    var html = '<div class="result">'
+      + '<p class="verdict ' + colour + '">' + escapeText(report.verdict_headline) + "</p>"
+      + '<p class="detail">' + escapeText(report.verdict_detail) + "</p><table>"
+      + "<tr><td>Format</td><td>" + escapeText(report.file.codec.toUpperCase() + " · " + (report.file.bitrate_kbps || "?") + " kbps") + "</td></tr>"
+      + "<tr><td>Sample rate</td><td>" + escapeText(report.file.sample_rate_hz + " Hz") + "</td></tr>"
+      + "<tr><td>Cutoff</td><td>" + escapeText(cutoff) + "</td></tr>"
+      + "<tr><td>Loudness</td><td>" + escapeText(report.loudness.integrated_lufs + " LUFS · true peak " + report.loudness.true_peak_dbtp + " dBTP") + "</td></tr>"
+      + "</table>";
+    if (report.spectrogram_png_base64) {
+      html = html + '<img alt="Spectrogram" src="data:image/png;base64,' + report.spectrogram_png_base64 + '">';
+    }
+    resultBox.innerHTML = html + "</div>";
   }
 
   fileInput.addEventListener("change", function () {
