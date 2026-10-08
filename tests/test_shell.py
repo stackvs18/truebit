@@ -49,3 +49,8 @@ def test_output_to_a_pipe_does_not_crash(tmp_path):
     )
     assert result.returncode == 0, result.stderr.decode("utf-8", "replace")
     assert "◆" in result.stdout.decode("utf-8")
+
+
+def test_tag_values_with_quotes_and_apostrophes():
+    words = split_command('tags song.mp3 --set title="Don\'t Stop" --set artist=Guns\'n\'Roses')
+    assert words == ["tags", "song.mp3", "--set", "title=Don't Stop", "--set", "artist=Guns'n'Roses"]

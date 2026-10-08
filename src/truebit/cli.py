@@ -5,6 +5,7 @@
 #   truebit scan "D:\Music"          a whole folder (add --json report.json to save)
 #   truebit compare a.flac b.mp3     which copy is genuinely better?
 #   truebit fix "D:\Music"           repair noise, make fakes honest, normalize loudness
+#   truebit tags song.mp3            every tag; --set title="..." changes them for good
 #   truebit repair song.wav          fix clipping, clicks and background noise
 #   truebit normalize song.flac      set loudness to -14 LUFS (Spotify) or another target
 #   truebit serve                    web API and upload page
@@ -445,6 +446,155 @@ def fix(path: Path = typer.Argument(..., exists=True, help="An audio file, or a 
     tool_call("Saved", f"{fixed_count} file{'s' if fixed_count != 1 else ''} in {output_folder}")
     tool_result("Tags and cover art are kept. Nothing can bring back sound a lossy encoder deleted, "
                 "so fixed fakes are honest and smaller, not better.", style=DIM)
+
+
+# Turns ["title=My Song", "year=2024"] into {"title": "My Song", "year": "2024"}
+def parse_set_values(set_values):
+    result = {}
+    for item in set_values or []:
+        if "=" not in item:
+            fail(f'"{item}" needs a name and a value, like --set title="My Song"')
+        name, value = item.split("=", 1)
+        result[name.strip()] = value.strip()
+    return result
+
+
+# "image/jpeg, 45 KB" for the cover art, or "none"
+def cover_text(cover):
+    if cover is None:
+        return "none"
+    kind = cover["mime"].split("/")[-1].upper().replace("JPEG", "JPG")
+    if cover["bytes"] < 1024:
+        return f"{kind} picture, {cover['bytes']} bytes"
+    return f"{kind} picture, {format_size(cover['bytes'])}"
+
+
+# Shows every tag of one file
+def show_file_tags(file_path):
+    from truebit.tags import read_all_tags
+
+    info = read_all_tags(file_path)
+    tool_result(f"{len(info['tags'])} tags · cover art: {cover_text(info['cover'])} · stored as {info['family']}")
+    for name, value in info["tags"]:
+        console.print(Text(f"   {name:<14} ", style=DIM) + Text(short_value(value)))
+
+
+# Long values (like lyrics) as their first line, e.g. "Y'all throwin'... (48 lines)"
+def short_value(value):
+    lines = value.strip().splitlines()
+    if len(lines) == 0:
+        return ""
+    text = lines[0]
+    if len(text) > 90:
+        text = text[:90] + "…"
+    if len(lines) > 1:
+        text = text + f"  ({len(lines)} lines)"
+    return text
+
+
+# Shows title / artist / album... for every file in a folder
+def show_folder_tags(file_list):
+    from truebit.tags import read_all_tags
+
+    table = Table(box=ROUNDED, border_style=DIM, header_style="bold")
+    for column in ["File", "Title", "Artist", "Album", "Year", "Track", "Cover"]:
+        table.add_column(column)
+    for file_path in file_list:
+        try:
+            info = read_all_tags(file_path)
+        except Exception as error:  # a file mutagen can't read shouldn't stop the list
+            table.add_row(file_path.name, f"[{RED}]{error}[/]", "", "", "", "", "")
+            continue
+        values = dict(info["tags"])
+        table.add_row(file_path.name, values.get("title", ""), values.get("artist", ""), values.get("album", ""),
+                      values.get("year", ""), values.get("track", ""), "✓" if info["cover"] else "")
+    console.print(table)
+
+
+@app.command()
+def tags(path: Path = typer.Argument(..., exists=True, help="An audio file, or a folder of them."),
+         set_values: list[str] = typer.Option(None, "--set", help='Set a tag, e.g. --set title="My Song" (repeat for more).'),
+         remove: list[str] = typer.Option(None, "--remove", help="Remove a tag, e.g. --remove comment."),
+         clear: bool = typer.Option(False, "--clear", help="Remove every tag and the cover art."),
+         cover: Path = typer.Option(None, "--cover", exists=True, dir_okay=False, help="New cover art (.jpg or .png)."),
+         remove_cover: bool = typer.Option(False, "--remove-cover", help="Take the cover art out."),
+         save_cover_to: Path = typer.Option(None, "--save-cover", help="Save the cover art as a picture file."),
+         output: Path = typer.Option(None, "--output", "-o", help="Change a copy instead of the original."),
+         yes: bool = typer.Option(False, "--yes", "-y", help="Don't ask before changing files.")):
+    """See every tag (title, artist, album, cover art...) and change them for good."""
+    from truebit.tags import TagError, change_tags, read_all_tags, save_cover
+
+    # Step 1: which files
+    if path.is_dir():
+        file_list = find_audio_files(path)
+    else:
+        file_list = [path]
+    if len(file_list) == 0:
+        tool_call("Tags", str(path))
+        tool_result("No audio files found.")
+        return
+
+    new_values = parse_set_values(set_values)
+    wants_changes = len(new_values) > 0 or len(remove or []) > 0 or clear or cover is not None or remove_cover
+
+    # Step 2: just looking
+    if not wants_changes:
+        tool_call("Tags", path.name or str(path))
+        try:
+            if path.is_dir():
+                show_folder_tags(file_list)
+            else:
+                show_file_tags(path)
+                if save_cover_to is not None:
+                    saved_path = save_cover(path, save_cover_to)
+                    if saved_path is None:
+                        tool_result("There's no cover art to save.", style=YELLOW)
+                    else:
+                        tool_call("Saved", str(saved_path))
+        except TagError as error:
+            fail(str(error))
+        return
+
+    # Step 3: changing. Unless it's a copy, ask first: this changes the files for good.
+    if output is not None and path.is_dir():
+        fail("--output works with one file. For a folder, the files themselves are changed.")
+    if output is None and not yes:
+        count = f"{len(file_list)} file{'s' if len(file_list) != 1 else ''}"
+        if not typer.confirm(f"Change the tags of {count} permanently? (The sound itself isn't touched.)"):
+            tool_result("Nothing was changed.", style=DIM)
+            return
+
+    tool_call("Tags", f"{path.name or path} ({len(file_list)} file{'s' if len(file_list) != 1 else ''})")
+    changed_count = 0
+    for file_path in file_list:
+        try:
+            before = dict(read_all_tags(file_path)["tags"])
+            changed_path = change_tags(file_path, new_values, remove, clear, cover, remove_cover, output)
+            after_info = read_all_tags(changed_path)
+            changed_count = changed_count + 1
+        except (TagError, OSError) as error:
+            tool_result(f"{file_path.name}: {error}", style=RED)
+            continue
+
+        # One file: show exactly what changed, before and after
+        if len(file_list) == 1:
+            after = dict(after_info["tags"])
+            table = Table(box=ROUNDED, border_style=DIM, header_style="bold")
+            table.add_column("Tag")
+            table.add_column("Before")
+            table.add_column("After")
+            changed_names = sorted(set(before) | set(after))
+            for name in changed_names:
+                if before.get(name) != after.get(name):
+                    table.add_row(name, before.get(name, f"[{DIM}]—[/]"), after.get(name, f"[{DIM}]removed[/]"))
+            if cover is not None or remove_cover or clear:
+                table.add_row("cover art", "", cover_text(after_info["cover"]))
+            console.print(table)
+            if output is not None:
+                tool_call("Saved", str(changed_path))
+
+    tool_result(f"Changed {changed_count} of {len(file_list)} file{'s' if len(file_list) != 1 else ''}. "
+                "Only the tags were rewritten: the audio is exactly the same.", style=GREEN)
 
 
 # One cell of the compare table

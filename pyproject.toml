@@ -6,8 +6,17 @@ readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
 authors = [{ name = "Vraj Patel" }]
-dependencies = ["typer>=0.12", "rich>=13", "numpy>=1.26", "scipy>=1.11",
-                "fastapi>=0.110", "uvicorn>=0.29", "python-multipart>=0.0.9", "tzdata>=2024.1"]
+dependencies = [
+    "typer>=0.12",
+    "rich>=13",
+    "numpy>=1.26",
+    "scipy>=1.11",
+    "fastapi>=0.110",
+    "uvicorn>=0.29",
+    "python-multipart>=0.0.9",
+    "tzdata>=2024.1",
+    "mutagen>=1.48.1",
+]
 
 [project.scripts]
 truebit = "truebit.cli:app"

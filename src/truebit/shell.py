@@ -15,7 +15,7 @@ from rich.text import Text
 
 from truebit.ui import BLUE, DIM, RED, console
 
-COMMANDS = ["check", "scan", "compare", "fix", "repair", "normalize", "serve", "version"]
+COMMANDS = ["check", "scan", "compare", "fix", "tags", "repair", "normalize", "serve", "version"]
 EXIT_WORDS = ["exit", "quit", "q", ":q"]
 
 HELP_ROWS = [
@@ -23,6 +23,7 @@ HELP_ROWS = [
     ("scan FOLDER", "Check every audio file in a folder (--json report.json to save)"),
     ("compare A B", "Which of two copies is genuinely better"),
     ("fix FILE/FOLDER", "Repair noise and clipping, make fakes honest, normalize loudness"),
+    ("tags FILE/FOLDER", "Every tag and the cover; --set title=\"...\" --remove comment --cover art.jpg"),
     ("repair FILE", "Fix clipping, clicks and hiss (--strength light/medium/strong)"),
     ("normalize FILE", "Set loudness to -14 LUFS (--preset apple / broadcast, --target -12)"),
     ("serve", "Start the web upload page (ctrl+c to stop)"),
@@ -34,14 +35,19 @@ HELP_ROWS = [
 
 # Splits a typed line into words, keeping "quoted paths with spaces" together.
 # (Windows paths contain backslashes, so we can't use Python's shlex here.)
+# A quote only starts quoting at the start of a word or right after "=" (title="My Song"),
+# and only the same kind of quote ends it, so title="Don't Stop" and title=Don't both work.
 def split_command(line):
     words = []
     current = ""
-    inside_quotes = False
+    open_quote = None
     for character in line:
-        if character == '"' or character == "'":
-            inside_quotes = not inside_quotes
-        elif character == " " and not inside_quotes:
+        starts_quote = character in ('"', "'") and (current == "" or current.endswith("="))
+        if open_quote is None and starts_quote:
+            open_quote = character
+        elif open_quote is not None and character == open_quote:
+            open_quote = None
+        elif character == " " and open_quote is None:
             if current != "":
                 words.append(current)
                 current = ""

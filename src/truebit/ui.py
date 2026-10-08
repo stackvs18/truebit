@@ -181,6 +181,7 @@ def welcome(version, folder):
         ("scan FOLDER", "a whole library"),
         ("compare A B", "which copy is better"),
         ("fix PATH", "clean up noisy and fake files"),
+        ("tags PATH", "see and change tags, cover art"),
         ("repair FILE", "fix clipping, clicks, hiss"),
         ("normalize FILE", "-14 LUFS like Spotify"),
         ("help · exit", ""),

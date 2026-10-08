@@ -1,6 +1,6 @@
 # TrueBit
 
-**Is your FLAC really lossless?** TrueBit checks any audio file (FLAC, WAV, AIFF, ALAC, MP3, M4A/AAC, OGG, Opus, WMA…) for what's really inside: whether it's **truly lossless**, the bitrate its **properties say** versus what it **really holds**, plus tags, cover art, encoder and loudness. It catches fake lossless and fake 320 kbps audio by the frequency "cliff" every encoder leaves behind, then **fixes** problem files: noisy, clipped and fake upscaled audio comes out clean, honest and evenly loud. It's an interactive terminal app, and also a web API.
+**Is your FLAC really lossless?** TrueBit checks any audio file (FLAC, WAV, AIFF, ALAC, MP3, M4A/AAC, OGG, Opus, WMA…) for what's really inside: whether it's **truly lossless**, the bitrate its **properties say** versus what it **really holds**, plus tags, cover art, encoder and loudness, and lets you **change the tags for good** without touching the sound. It catches fake lossless and fake 320 kbps audio by the frequency "cliff" every encoder leaves behind, then **fixes** problem files: noisy, clipped and fake upscaled audio comes out clean, honest and evenly loud. It's an interactive terminal app, and also a web API.
 
 ```powershell
 irm https://raw.githubusercontent.com/stackvs18/truebit/main/install.ps1 | iex
@@ -89,6 +89,7 @@ Every command also works directly:
 | `truebit check FILE --save` | Also saves a JSON report and a spectrogram to `./truebit-reports/` (never next to your music) |
 | `truebit scan FOLDER` | Every audio file in a folder and its sub-folders, with Says / Stores / Really columns and a count of genuine lossless, fake and lossy files; `--json report.json` saves everything |
 | `truebit fix FILE or FOLDER` | **Fixes problem files**: rebuilds clipped peaks, turns down hiss, re-encodes fakes at their honest bitrate, normalizes loudness. Saves to `./truebit-fixed/`, never touching the originals |
+| `truebit tags FILE or FOLDER` | **Every tag** (title, artist, album, year, track, comment, lyrics, encoder, any custom tag) and the cover art. `--set title="My Song"`, `--remove comment`, `--clear`, `--cover art.jpg`, `--remove-cover`, `--save-cover cover.jpg` change them **permanently** (it asks first; `--yes` skips the question, `--output copy.mp3` changes a copy instead) |
 | `truebit compare A B` | **Which copy is genuinely better**, judged by what's really in the files, not the label |
 | `truebit repair FILE` | Rebuilds clipped peaks, removes clicks, reduces hiss; shows before/after numbers. `--strength light/medium/strong`, `--no-declick`, `--no-denoise`… |
 | `truebit normalize FILE` | Sets loudness to **−14 LUFS** like Spotify/YouTube; `--preset apple` (−16), `broadcast` (−23), or `--target -12` |
@@ -145,6 +146,42 @@ flowchart LR
 | Every file | Normalizes the loudness to −14 LUFS (`--target` to change), keeps the tags and cover art |
 
 **Honest bitrate** = one step above what the sound really holds, so re-encoding adds no audible loss, but under TrueBit's 1.4× "fake" limit: ~128 kbps → **160**, ~192 → **224**, ~256 → **320**. A fixed fake comes out **smaller and honestly labelled**. It doesn't come out better, because nothing can bring back what the first encoder deleted. Repairs happen in a 32-bit float temporary file, so the only lossy step is the final encode.
+
+---
+
+## Tags: see and change the metadata
+
+```
+truebit › tags song.mp3 --set title="Don't Stop" --set year=2024 --set track=3/12 --remove album --cover art.png
+Change the tags of 1 file permanently? (The sound itself isn't touched.) [y/N]: y
+◆ Tags  song.mp3 (1 file)
+┌───────────┬───────────┬──────────────────────┐
+│ Tag       │ Before    │ After                │
+├───────────┼───────────┼──────────────────────┤
+│ album     │ Demo      │ removed              │
+│ title     │ Test Song │ Don't Stop           │
+│ track     │ —         │ 3/12                 │
+│ year      │ —         │ 2024                 │
+│ cover art │           │ PNG picture, 45 KB   │
+└───────────┴───────────┴──────────────────────┘
+╰─ Changed 1 of 1 file. Only the tags were rewritten: the audio is exactly the same.
+```
+
+- `truebit tags song.mp3` lists **every** tag, including encoder, lyrics, ReplayGain and custom ones, plus the cover art and where the tags are stored.
+- `truebit tags "D:\Music\Album"` shows title / artist / album / year / track / cover for every file, and `--set album="Best Of" --yes` changes the whole folder at once.
+- The same names work in every format: `title`, `artist`, `album`, `albumartist`, `year`, `genre`, `track`, `disc`, `composer`, `comment`. Any other name becomes a custom tag (`--set mood=happy`).
+- Edits are **permanent**: the file itself is changed (TrueBit asks first). Only the tag part is rewritten, never the audio. The tests check this with a fingerprint of the decoded sound before and after, in every format.
+
+| Format | Where the tags live | Cover art |
+|---|---|---|
+| MP3, WAV, AIFF | ID3v2 tag (saved as v2.3, which Windows reads best) | ✓ |
+| FLAC, OGG, Opus | Vorbis comments | ✓ |
+| M4A, M4B (AAC and ALAC) | MP4 (iTunes) atoms | ✓ |
+| WMA | ASF attributes | read only |
+| APE, WavPack | APEv2 tag | read only |
+| Raw AAC (`.aac`) | can't hold tags: save it as M4A first | — |
+
+Built on [mutagen](https://mutagen.readthedocs.io/), which reads and writes all of these in pure Python.
 
 ---
 
@@ -347,6 +384,7 @@ flowchart LR
 | Terminal UI | **Rich** | Colours, tables, the live animated spinner |
 | Web API | **FastAPI** + Uvicorn | File uploads, automatic `/docs` |
 | Quota | **SQLite** | A tiny `usage(ip, day, count)` table, no server needed |
+| Tags | **mutagen** | Reads and writes ID3, Vorbis comments, MP4 atoms, ASF and APEv2 tags without touching the audio |
 | Packaging | **uv** + `pyproject.toml` | `uv tool install` puts `truebit` on your PATH; `install.ps1` does it in one line |
 | Hosting | **Docker** + Render | Python and FFmpeg in one image |
 
@@ -368,12 +406,13 @@ src/truebit/
   repair.py     declick → declip → denoise → limiter
   normalize.py  two-pass EBU R128 loudness normalization
   fix.py        one command for problem files: repair, make fakes honest, normalize
+  tags.py       read every tag and change them for good (mutagen), cover art in and out
   compare.py    which copy is genuinely better
   output.py     shared: output file names, running FFmpeg (keeps tags and cover art)
   api.py        FastAPI: upload page, /analyze, /health, /install.ps1
   quota.py      5 analyses per IP per day (SQLite)
   upload.html   the upload page, with the same equalizer spinner
-tests/          real test audio made with FFmpeg, in every format (50 tests)
+tests/          real test audio made with FFmpeg, in every format (70 tests)
 scripts/        make_screenshot.py: records the terminal output as docs/check.png
 install.ps1     one-line Windows installer; re-run to update
 Dockerfile      Python + FFmpeg image for the web API
@@ -389,13 +428,13 @@ git clone https://github.com/stackvs18/truebit
 cd truebit
 uv sync
 uv run truebit check some_song.flac
-uv run pytest                    # 50 tests, about 25 seconds
+uv run pytest                    # 70 tests, about 25 seconds
 
 # Make `truebit` a real command that uses this folder (code changes apply instantly)
 uv tool install --editable . --force
 ```
 
-The tests generate real audio with FFmpeg (pink noise, MP3 encodes, fakes, clipped tone bursts with hiss) and check the verdicts, the cutoff finder, every format in and out (MP3, M4A, AAC, OGG, Opus, WMA, WAV, AIFF, ALAC), says / stores / really, CBR vs VBR, tags and cover art surviving, fix on fakes and hiss, repair numbers, normalize accuracy (±1 LUFS), compare, interactive-mode parsing, piped output, the real-music bugs and every API status code.
+The tests generate real audio with FFmpeg (pink noise, MP3 encodes, fakes, clipped tone bursts with hiss) and check the verdicts, the cutoff finder, every format in and out (MP3, M4A, AAC, OGG, Opus, WMA, WAV, AIFF, ALAC), says / stores / really, CBR vs VBR, tags and cover art surviving, tag editing in 8 formats with the sound fingerprinted before and after, fix on fakes and hiss, repair numbers, normalize accuracy (±1 LUFS), compare, interactive-mode parsing, piped output, the real-music bugs and every API status code.
 
 ---
 
