@@ -35,14 +35,15 @@ def to_db(value):
 
 
 # Everything for the "loudness" part of the report
-def analyze_loudness(file_path, samples, sample_rate):
+# samples = every channel, interleaved (so peaks and clipping are measured on the real signal)
+def analyze_loudness(file_path, samples, sample_rate, channel_count=1):
     integrated, loudness_range, true_peak = ebu_r128(file_path)
 
     peak = float(np.max(np.abs(samples)))
     rms = float(np.sqrt(np.mean(samples.astype(np.float64) ** 2)))
 
-    # Noise floor: the quietest 5% of 50 ms windows
-    window = max(int(sample_rate * 0.05), 1)
+    # Noise floor: the quietest 5% of 50 ms windows (a window holds every channel's samples)
+    window = max(int(sample_rate * 0.05) * channel_count, 1)
     window_count = len(samples) // window
     noise_floor_db = None
     if window_count > 0:

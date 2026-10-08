@@ -26,11 +26,11 @@
     img { width: 100%; border-radius: 12px; margin-top: 16px; }
     .note { color: var(--muted); font-size: 13px; margin-top: 18px; }
 
-    /* The Claude Code style "thinking" line: a changing star, a shimmering verb, a timer */
-    .thinking { font-family: "Geist Mono", ui-monospace, monospace; font-size: 15px; color: #D77757; }
-    .thinking .star { display: inline-block; width: 1.2em; }
+    /* The "thinking" line: bouncing equalizer bars, a shimmering verb, a timer (macOS blue) */
+    .thinking { font-family: "Geist Mono", ui-monospace, monospace; font-size: 15px; color: #0A84FF; }
+    .thinking .star { display: inline-block; width: 3.2em; letter-spacing: 1px; }
     .thinking .verb {
-      background: linear-gradient(90deg, #D77757 0%, #D77757 40%, #F4C6B3 50%, #D77757 60%, #D77757 100%);
+      background: linear-gradient(90deg, #0A84FF 0%, #0A84FF 40%, #64D2FF 50%, #0A84FF 60%, #0A84FF 100%);
       background-size: 300% 100%; -webkit-background-clip: text; background-clip: text; color: transparent;
       animation: shimmer 1.6s linear infinite;
     }
@@ -65,8 +65,19 @@
     return element.innerHTML;
   }
 
-  // ---- The animated "thinking" line (like Claude Code) -------------------------------
-  var STAR_FRAMES = ["·", "✢", "✳", "✶", "✻", "✽", "✻", "✶", "✳", "✢"];
+  // ---- The animated "thinking" line: equalizer bars, shimmering verb, timer ----------
+  var BAR_LEVELS = "▁▂▃▄▅▆▇█";
+
+  // Four equalizer bars, each bouncing on its own wave, like audio levels
+  function equalizerFrame(seconds) {
+    var bars = "";
+    for (var barNumber = 0; barNumber < 4; barNumber = barNumber + 1) {
+      var wave = Math.sin(seconds * 9 + barNumber * 1.7) * 0.5 + Math.sin(seconds * 5.3 + barNumber) * 0.5;
+      var height = Math.floor((wave + 1) / 2 * (BAR_LEVELS.length - 1));
+      bars = bars + BAR_LEVELS.charAt(height);
+    }
+    return bars;
+  }
   var VERBS = ["Pollinating", "Sniffing for brickwalls", "Interrogating the Nyquist",
     "Untangling waveforms", "Counting lost harmonics", "Bribing the FFT", "Squinting at 16 kHz",
     "Listening very carefully", "Chasing the cliff", "Welching the spectrum", "Herding decibels"];
@@ -100,7 +111,7 @@
         verb = nextVerb;
         verbChangedAt = now;
       }
-      starElement.textContent = STAR_FRAMES[Math.floor((now - startedAt) / 100) % STAR_FRAMES.length];
+      starElement.textContent = equalizerFrame((now - startedAt) / 1000);
       verbElement.textContent = verb + "…";
       metaElement.textContent = " (" + formatElapsed(Math.floor((now - startedAt) / 1000)) + " · " + getDetail() + ")";
     }, 80);

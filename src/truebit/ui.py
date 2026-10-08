@@ -1,13 +1,14 @@
-# The Claude Code look for TrueBit's terminal output.
+# TrueBit's terminal look: macOS blue, an animated equalizer, and its own symbols.
 #
-#   ✻ Sniffing for brickwalls… (12s · 4.2 MB · ctrl+c to stop)     <- animated "thinking" line
+#   ▂▅▇▃ Sniffing for brickwalls… (12s · 4.2 MB · ctrl+c to stop)     <- animated "thinking" line
 #
-#   ⏺ Check(fake_from_128.flac)                                     <- a tool call
-#     ⎿  FAKE LOSSLESS: upscaled from ~128 kbps                      <- its result
+#   ◆ Check  song.flac                                                 <- an action
+#   ╰─ FAKE LOSSLESS: upscaled from ~128 kbps                          <- its result
 #
-# The star changes shape every 0.1 s (· ✢ ✳ ✶ ✻ ✽ and back), a bright band shimmers across
-# the verb, the verb itself changes every 2 seconds, and the timer counts up.
+# The four equalizer bars bounce like audio levels, a light band shimmers across the verb,
+# the verb changes every 2 seconds, and the timer counts up.
 
+import math
 import random
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -15,27 +16,31 @@ from concurrent.futures import ThreadPoolExecutor
 from rich.console import Console
 from rich.live import Live
 from rich.padding import Padding
-from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
-CLAUDE_ORANGE = "#D77757"
-SHIMMER = "#F4C6B3"
-GREEN = "#7BC67E"
-RED = "#E8735A"
-YELLOW = "#E5C07B"
-DIM = "#8A8A8A"
+BLUE = "#0A84FF"  # macOS system blue (dark mode)
+LIGHT_BLUE = "#64D2FF"  # macOS cyan, used for the shimmer and the logo gradient
+GREEN = "#30D158"  # macOS green
+RED = "#FF453A"  # macOS red
+YELLOW = "#FFD60A"  # macOS yellow
+DIM = "#8E8E93"  # macOS secondary grey
 
-STAR_FRAMES = ["·", "✢", "✳", "✶", "✻", "✽", "✻", "✶", "✳", "✢"]
+BAR_LEVELS = "▁▂▃▄▅▆▇█"
 SECONDS_PER_VERB = 2.0
 
 VERBS = [
-    "Pollinating", "Sniffing for brickwalls", "Interrogating the Nyquist", "Untangling waveforms",
+    "Sniffing for brickwalls", "Interrogating the Nyquist", "Untangling waveforms",
     "Counting lost harmonics", "Bribing the FFT", "Squinting at 16 kHz", "Listening very carefully",
     "Measuring the loudness war", "Asking the encoder nicely", "Welching the spectrum",
-    "Chasing the cliff", "Decoding vibes", "Consulting the spectrogram", "Herding decibels",
-    "Unmuddling the mids", "Polishing peaks", "Hushing the hiss", "Smoothing the crackle",
+    "Chasing the cliff", "Consulting the spectrogram", "Herding decibels", "Unmuddling the mids",
+    "Polishing peaks", "Hushing the hiss", "Smoothing the crackle", "Tuning the tweeters",
+    "Weighing every bit", "Following the frequencies",
 ]
+
+# The TRUEBIT logo, drawn with block characters (two rows)
+LOGO_TOP = "▀█▀ █▀█ █ █ █▀▀ █▄▄ █ ▀█▀"
+LOGO_BOTTOM = " █  █▀▄ █▄█ ██▄ █▄█ █  █ "
 
 console = Console(highlight=False)
 
@@ -63,22 +68,31 @@ def next_verb(previous_verb):
     return verb
 
 
+# Four equalizer bars. Each bar bounces on its own sine wave, so they move like audio levels.
+def equalizer_frame(elapsed):
+    bars = ""
+    for bar_number in range(4):
+        wave = math.sin(elapsed * 9 + bar_number * 1.7) * 0.5 + math.sin(elapsed * 5.3 + bar_number) * 0.5
+        height = int((wave + 1) / 2 * (len(BAR_LEVELS) - 1))
+        bars = bars + BAR_LEVELS[height]
+    return bars
+
+
 # One frame of the thinking line
 def thinking_line(verb, started_at, detail):
     elapsed = time.monotonic() - started_at
-    frame = STAR_FRAMES[int(elapsed * 10) % len(STAR_FRAMES)]
 
     line = Text()
-    line.append(frame + " ", style=CLAUDE_ORANGE)
+    line.append(equalizer_frame(elapsed) + " ", style=BLUE)
 
-    # The shimmer: a bright band that sweeps across the verb, left to right
+    # The shimmer: a light band that sweeps across the verb, left to right
     word = verb + "…"
     band_position = int(elapsed * 14) % (len(word) + 8) - 4
     for position in range(len(word)):
         if abs(position - band_position) <= 1:
-            line.append(word[position], style="bold " + SHIMMER)
+            line.append(word[position], style="bold " + LIGHT_BLUE)
         else:
-            line.append(word[position], style=CLAUDE_ORANGE)
+            line.append(word[position], style=BLUE)
 
     extras = [format_elapsed(elapsed)]
     if detail:
@@ -108,50 +122,64 @@ def run_with_spinner(job, *arguments, detail=""):
 
         took = format_elapsed(time.monotonic() - started_at)
         result = future.result()
-        console.print(Text("✻ ", style=CLAUDE_ORANGE) + Text(f"Done in {took}", style=DIM))
+        console.print(Text("▂▄▆█ ", style=BLUE) + Text(f"Done in {took}", style=DIM))
         return result
 
 
-# "⏺ Check(song.flac)"
+# "◆ Check  song.flac"
 def tool_call(name, argument, ok=True):
     line = Text()
-    line.append("⏺ ", style=GREEN if ok else RED)
+    line.append("◆ ", style=BLUE if ok else RED)
     line.append(name, style="bold")
-    line.append("(" + argument + ")")
+    line.append("  " + argument, style=DIM)
     console.print(line)
 
 
-# "  ⎿  text" under a tool call. A two-column grid keeps long, wrapped text indented.
+# "╰─ text" under an action. A two-column grid keeps long, wrapped text indented.
 def tool_result(text, style=""):
     grid = Table.grid()
-    grid.add_column(width=5, no_wrap=True)
+    grid.add_column(width=3, no_wrap=True)
     grid.add_column()
-    grid.add_row(Text("  ⎿  ", style=DIM), Text(str(text), style=style))
+    grid.add_row(Text("╰─ ", style=DIM), Text(str(text), style=style))
     console.print(grid)
 
 
 # Indented text (used for longer explanations under a result)
 def indented(text, style=DIM):
-    console.print(Padding(Text(str(text), style=style), (0, 0, 0, 5)))
+    console.print(Padding(Text(str(text), style=style), (0, 0, 0, 3)))
 
 
-# The welcome box shown by `truebit` with no command
+# The logo, coloured from blue to light blue, left to right
+def logo_line(row_text):
+    line = Text()
+    for position in range(len(row_text)):
+        if position < len(row_text) / 2:
+            line.append(row_text[position], style="bold " + BLUE)
+        else:
+            line.append(row_text[position], style="bold " + LIGHT_BLUE)
+    return line
+
+
+# The start screen shown when TrueBit opens
 def welcome(version, folder):
-    body = Text()
-    body.append("✻ ", style=CLAUDE_ORANGE)
-    body.append("Welcome to TrueBit!", style="bold")
-    body.append(f"  v{version}\n\n", style=DIM)
-    body.append("  /help for help, or try:\n\n", style=DIM)
+    console.print()
+    console.print(Text("  ") + logo_line(LOGO_TOP))
+    console.print(Text("  ") + logo_line(LOGO_BOTTOM))
+    console.print()
+    console.print(Text(f"  v{version} · is your FLAC really lossless?", style=DIM))
+    console.print()
+
     commands = [
-        ("truebit check song.flac", "real or fake?"),
-        ("truebit scan D:\\Music", "a whole library"),
-        ("truebit compare a.flac b.mp3", "which copy is better"),
-        ("truebit repair old.wav", "fix clipping, clicks, hiss"),
-        ("truebit normalize song.flac", "-14 LUFS like Spotify"),
-        ("truebit serve", "web upload page"),
+        ("check FILE", "real or fake?"),
+        ("scan FOLDER", "a whole library"),
+        ("compare A B", "which copy is better"),
+        ("repair FILE", "fix clipping, clicks, hiss"),
+        ("normalize FILE", "-14 LUFS like Spotify"),
+        ("help · exit", ""),
     ]
     for command, meaning in commands:
-        body.append(f"  {command:<32}", style=CLAUDE_ORANGE)
-        body.append(meaning + "\n", style=DIM)
-    body.append(f"\n  cwd: {folder}", style=DIM)
-    console.print(Panel(body, border_style=CLAUDE_ORANGE, padding=(1, 2), expand=False))
+        console.print(Text(f"  {command:<18}", style=BLUE) + Text(meaning, style=DIM))
+    console.print()
+    console.print(Text("  Tip: drag a file or folder into this window and press Enter.", style=DIM))
+    console.print(Text(f"  {folder}", style=DIM))
+    console.print()

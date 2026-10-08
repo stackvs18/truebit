@@ -60,7 +60,18 @@ def compare_files(first_path, second_path):
     if duration_gap > MAX_DURATION_DIFFERENCE_SECONDS:
         warning = f"The lengths differ by {duration_gap:.0f} s; these may not be the same recording."
 
-    if abs(first_points - second_points) < 0.01:
+    first_clipped = first["loudness"]["clipped_samples"]
+    second_clipped = second["loudness"]["clipped_samples"]
+
+    if abs(first_points - second_points) < 0.01 and first_clipped != second_clipped:
+        # Same real detail: the copy with less clipping (distortion) wins
+        if first_clipped < second_clipped:
+            winner = Path(first_path).name
+        else:
+            winner = Path(second_path).name
+        explanation = (f"Same real cutoff, but less clipping "
+                       f"({min(first_clipped, second_clipped):,} vs {max(first_clipped, second_clipped):,} clipped samples).")
+    elif abs(first_points - second_points) < 0.01:
         winner = None
         explanation = "Both copies have the same real quality. Keep the smaller one."
     elif first_points > second_points:

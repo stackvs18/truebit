@@ -18,6 +18,10 @@ from truebit.probe import check_ffmpeg, decode, probe
 # How hard the noise reduction works (decibels of reduction)
 NOISE_REDUCTION_DB = {"light": 6, "medium": 12, "strong": 20}
 
+# A measured "noise floor" louder than this is quiet music, not hiss
+MUSIC_NOT_HISS_DB = -30
+DEFAULT_NOISE_FLOOR_DB = -50
+
 
 # Builds the FFmpeg filter chain for the chosen steps.
 # noise_floor_db is the measured hiss level (afftdn accepts -80 to -20 dB).
@@ -34,10 +38,10 @@ def build_filter_chain(declick=True, declip=True, denoise=True, strength="medium
     return ",".join(filters)
 
 
-# The numbers we compare before and after
-def measure(file_path, sample_rate):
+# The numbers we compare before and after (measured on every channel, not a mono mix)
+def measure(file_path, sample_rate, channel_count):
     samples = decode(file_path)
-    loudness = analyze_loudness(file_path, samples, sample_rate)
+    loudness = analyze_loudness(file_path, samples, sample_rate, channel_count)
     noise_floor = loudness["noise_floor_dbfs"]
     return {
         "clipped_samples": loudness["clipped_samples"],
@@ -54,15 +58,23 @@ def repair_file(input_path, output=None, declick=True, declip=True, denoise=True
         raise ValueError("strength must be light, medium or strong")
 
     # Step 1: measure the original
-    sample_rate = probe(input_path)["sample_rate_hz"]
-    before = measure(input_path, sample_rate)
+    file_info = probe(input_path)
+    sample_rate = file_info["sample_rate_hz"]
+    channel_count = file_info["channels"]
+    before = measure(input_path, sample_rate, channel_count)
 
-    # Step 2: run the repair filters into a new file
+    # Step 2: decide where the hiss sits.
+    # If even the quietest moments are louder than -30 dB, the track has no quiet gaps (dense,
+    # loud music), so that "floor" is music, not hiss. Then use a gentle default instead.
+    noise_floor = before["noise_floor_dbfs"]
+    if noise_floor is None or noise_floor > MUSIC_NOT_HISS_DB:
+        noise_floor = DEFAULT_NOISE_FLOOR_DB
+
+    # Step 3: run the repair filters into a new file
     output_path = output_path_for(input_path, "repaired", output)
-    noise_floor = before["noise_floor_dbfs"] if before["noise_floor_dbfs"] is not None else -50
     filter_chain = build_filter_chain(declick, declip, denoise, strength, noise_floor)
     run_filter(input_path, output_path, filter_chain, sample_rate)
 
-    # Step 3: measure the result
-    after = measure(output_path, sample_rate)
+    # Step 4: measure the result
+    after = measure(output_path, sample_rate, channel_count)
     return output_path, before, after

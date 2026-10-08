@@ -66,9 +66,13 @@ def probe(file_path):
 
 # Decodes the audio into a numpy array of samples between -1.0 and 1.0 (mono, original sample rate).
 # Only the first max_seconds are used, which is plenty to find the cutoff and keeps it fast.
+#
+# Returns the samples of EVERY channel, interleaved (left, right, left, right...).
+# We don't let FFmpeg mix stereo down to mono: its downmix adds the channels together,
+# which can push values above 1.0 and make a clean file look clipped.
 def decode(file_path, max_seconds=120):
     command = ["ffmpeg", "-v", "error", "-i", str(file_path), "-t", str(max_seconds),
-               "-ac", "1", "-f", "f32le", "-"]
+               "-f", "f32le", "-"]
     result = subprocess.run(command, capture_output=True)
     if result.returncode != 0:
         raise AudioError("Can't decode this file: " + result.stderr.decode(errors="replace")[:200])
@@ -76,3 +80,12 @@ def decode(file_path, max_seconds=120):
     if len(samples) == 0:
         raise AudioError("The file decoded to silence (no samples).")
     return samples
+
+
+# Mixes interleaved channels into one mono signal by AVERAGING them (never above 1.0)
+def to_mono(samples, channel_count):
+    if channel_count <= 1:
+        return samples
+    usable_length = len(samples) - len(samples) % channel_count
+    frames = samples[:usable_length].reshape(-1, channel_count)
+    return frames.mean(axis=1)

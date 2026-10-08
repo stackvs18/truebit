@@ -19,6 +19,15 @@ PRESETS = {"spotify": -14.0, "youtube": -14.0, "apple": -16.0, "broadcast": -23.
 TRUE_PEAK_LIMIT = -1.0  # dBTP: leave 1 dB of headroom so encoders don't clip
 
 
+# Keeps a number inside a range, e.g. keep_between(0.78, -99, 0) -> 0
+def keep_between(value, lowest, highest):
+    if value < lowest:
+        return lowest
+    if value > highest:
+        return highest
+    return value
+
+
 # Pass 1: loudnorm measures the track and prints JSON at the end of its output
 def measure_for_loudnorm(input_path, target_lufs):
     filter_text = f"loudnorm=I={target_lufs}:TP={TRUE_PEAK_LIMIT}:LRA=11:print_format=json"
@@ -42,12 +51,19 @@ def normalize_file(input_path, target_lufs=-14.0, output=None):
     if measured["input_i"] in ("-inf", "inf"):
         raise AudioError("The file is silent, there's nothing to normalize.")
 
-    # Step 2: apply one exact gain change using the measurements
+    # Step 2: apply one exact gain change using the measurements.
+    # loudnorm only accepts values in certain ranges; very loud masters can measure above
+    # 0 LUFS (we found one at +0.78), so each value is kept inside its allowed range.
+    measured_i = keep_between(float(measured["input_i"]), -99, 0)
+    measured_tp = keep_between(float(measured["input_tp"]), -99, 99)
+    measured_lra = keep_between(float(measured["input_lra"]), 0, 99)
+    measured_thresh = keep_between(float(measured["input_thresh"]), -99, 0)
+    offset = keep_between(float(measured["target_offset"]), -99, 99)
     filter_text = (
         f"loudnorm=I={target_lufs}:TP={TRUE_PEAK_LIMIT}:LRA=11"
-        f":measured_I={measured['input_i']}:measured_TP={measured['input_tp']}"
-        f":measured_LRA={measured['input_lra']}:measured_thresh={measured['input_thresh']}"
-        f":offset={measured['target_offset']}:linear=true"
+        f":measured_I={measured_i}:measured_TP={measured_tp}"
+        f":measured_LRA={measured_lra}:measured_thresh={measured_thresh}"
+        f":offset={offset}:linear=true"
     )
     output_path = output_path_for(input_path, f"normalized{int(target_lufs)}", output)
     run_filter(input_path, output_path, filter_text, sample_rate)

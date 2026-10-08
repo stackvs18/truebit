@@ -6,6 +6,7 @@ A file sold or shared as "FLAC" or "320 kbps" is often just a 128 kbps MP3 conve
 
 ```powershell
 irm https://raw.githubusercontent.com/stackvs18/truebit/main/install.ps1 | iex
+truebit                                   # opens TrueBit: type commands or drag in a file
 truebit check "song.flac"                 # real or fake?
 truebit scan "D:\Music" --json report.json
 truebit compare "a.flac" "b.mp3"          # which copy is genuinely better?
@@ -35,7 +36,7 @@ truebit normalize "song.flac"             # -14 LUFS, like Spotify
 
 These are estimates (encoders differ slightly), calibrated on files made with LAME through FFmpeg.
 
-It also reports **loudness**: EBU R128 integrated loudness (LUFS), true peak, crest factor and clipped samples. It saves `song.truebit.json` and a spectrogram picture (`song.spectrogram.png`) next to the file.
+It also reports **loudness**: EBU R128 integrated loudness (LUFS), true peak, crest factor and clipped samples (measured on every channel). With `--save` it writes `song.truebit.json` and a spectrogram picture into `./truebit-reports/`, never next to your music, so your library is never changed.
 
 **Try it on a fake you make yourself:**
 ```powershell
@@ -50,8 +51,9 @@ truebit check fake.flac          # FAKE LOSSLESS: upscaled from ~128 kbps
 
 | Command | What it does |
 |---|---|
-| `truebit check FILE` | Full report: verdict, details, loudness, band chart; saves JSON and a spectrogram |
-| `truebit check FILE --no-spectrogram` | Same, without the picture |
+| `truebit` | Opens TrueBit's interactive mode: a `truebit ›` prompt where you type commands or drag in a file/folder; `help`, `exit` |
+| `truebit check FILE` | Full report: verdict, details, loudness, band chart |
+| `truebit check FILE --save` | Also saves the JSON report and a spectrogram to `./truebit-reports/` |
 | `truebit scan FOLDER` | Table of every audio file in a folder (and sub-folders) |
 | `truebit scan FOLDER --json report.json` | Also saves all reports |
 | `truebit compare A B` | Which of two copies of a song is genuinely better (by real cutoff, not the label) |
@@ -63,6 +65,16 @@ truebit check fake.flac          # FAKE LOSSLESS: upscaled from ~128 kbps
 Supported: FLAC, WAV, MP3, M4A/AAC, OGG, Opus, ALAC, AIFF, WMA (anything FFmpeg reads).
 
 ---
+
+## Interactive mode and the look
+
+Type `truebit` and it opens like an app (the way `claude` opens Claude Code): a TRUEBIT logo,
+then a `truebit ›` prompt that stays open until `exit`. Type any command, or just drag a file
+(checked) or a folder (scanned) into the window and press Enter.
+
+The look is TrueBit's own, in macOS blue: `◆` for each action, `╰─` for its result, and an
+animated **equalizer** (`▂▅▇▃`) while it works, with a shimmering verb that changes every 2 seconds
+and a live timer: `▅▇▃▂ Sniffing for brickwalls… (12s · 4.2 MB · ctrl+c to stop)`.
 
 ## Repair, normalize and compare
 
@@ -108,14 +120,16 @@ src/truebit/
   verdict.py    cutoff -> likely source -> verdict
   loudness.py   EBU R128 (ffmpeg ebur128), peak, RMS, crest factor, clipping
   report.py     runs everything, saves JSON and spectrogram
-  cli.py        typer + rich: spinner words, verdict panel, band chart, scan table
+  cli.py        every command (Typer)
+  shell.py      interactive mode: the truebit › prompt, pasted paths
+  ui.py         the look: macOS blue, equalizer spinner, logo
   api.py        FastAPI: upload page, /analyze, /health
   quota.py      5 analyses per IP per day (SQLite)
   repair.py     declick, declip, denoise, limiter
   normalize.py  two-pass EBU R128 loudness normalization
   compare.py    which copy is genuinely better
   output.py     shared: output file names, running FFmpeg filters
-tests/          real test audio made with FFmpeg: verdicts, tools, API, quota (20 tests)
+tests/          real test audio made with FFmpeg: verdicts, tools, API, quota, interactive mode (28 tests)
 Dockerfile      Python + FFmpeg image for hosting the API
 install.ps1     one-line Windows installer (FFmpeg + uv + TrueBit)
 ```
@@ -128,7 +142,24 @@ cd truebit
 uv sync
 uv run truebit check some_song.flac
 uv run pytest
+
+# Make `truebit` a real command (editable: code changes apply instantly)
+uv tool install --editable .
 ```
+
+## Tested on a real library
+
+On 36 real songs (MP3 and AAC): **scan took 30 s and found 11 fakes**, for example a "320 kbps" MP3
+with a 16.0 kHz cliff (really ~128 kbps). **Repair** took a heavily clipped track from
+**1,626,790 clipped samples to 0** (true peak +4.8 → +1.8 dBTP); **normalize** took a +0.78 LUFS
+master to exactly **−14 LUFS**.
+
+Two bugs were found this way and fixed, each with a regression test:
+1. Clipping was measured on a mono mix made by FFmpeg, which *adds* the channels, so a clean file
+   peaking at 0.95 looked like it peaked at 1.29. Now peaks and clipping are measured on every
+   channel, and mono is made by averaging.
+2. FFmpeg's `loudnorm` rejects a measured loudness above 0 LUFS; very loud masters measure +0.78.
+   The measurements are now kept inside the filter's allowed ranges.
 
 ## Next steps
 

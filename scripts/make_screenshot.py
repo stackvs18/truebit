@@ -20,16 +20,16 @@ cli.console = ui.console
 
 # Step 2: print what a real run looks like (with one frame of the animated spinner)
 ui.welcome("0.1.0", Path("D:/Music"))
-ui.console.print(Text("> ", style="dim") + Text("truebit check " + audio_file.name))
+ui.console.print(Text("truebit ", style="bold " + ui.BLUE) + Text("› ", style=ui.DIM) + Text("check " + audio_file.name + " --save"))
 ui.console.print()
 ui.tool_call("Check", audio_file.name)
 pretend_start = time.monotonic() - 12.4
 ui.console.print(ui.thinking_line("Sniffing for brickwalls", pretend_start, "1.1 MB"))
-ui.console.print(Text("✻ ", style=ui.CLAUDE_ORANGE) + Text("Done in 1s", style=ui.DIM))
+ui.console.print(Text("▂▄▆█ ", style=ui.BLUE) + Text("Done in 1s", style=ui.DIM))
 cli.print_report(analyze_file(audio_file))
 ui.console.print()
-ui.tool_call("Write", audio_file.stem + ".truebit.json")
-ui.tool_call("Write", audio_file.stem + ".spectrogram.png")
+ui.tool_call("Saved", "truebit-reports/" + audio_file.stem + ".truebit.json")
+ui.tool_call("Saved", "truebit-reports/" + audio_file.stem + ".spectrogram.png")
 
 # Step 3: save as an SVG picture
 Path("docs").mkdir(exist_ok=True)

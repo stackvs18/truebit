@@ -65,6 +65,27 @@ def test_compare_prefers_real_lossless_even_with_lower_bitrate(folder):
     assert "genuine lossless" in result["reason"]
 
 
+def test_clean_loud_stereo_is_not_called_clipped(tmp_path):
+    # Regression: mixing stereo to mono by ADDING channels made a 0.9 peak look like 1.8
+    path = tmp_path / "loud_stereo.flac"
+    ffmpeg("-f", "lavfi", "-i", "aevalsrc='0.9*sin(2*PI*440*t)|0.9*sin(2*PI*440*t)':s=44100:d=3",
+           str(path))
+    from truebit.report import analyze_file
+    report = analyze_file(path)
+    assert report["loudness"]["clipped_samples"] == 0
+    assert report["loudness"]["sample_peak_dbfs"] < 0
+
+
+def test_normalize_works_on_a_master_louder_than_0_lufs(tmp_path):
+    # Regression: loudnorm refuses measured_I above 0, and real loud masters measure +0.78
+    path = tmp_path / "very_loud.flac"
+    ffmpeg("-f", "lavfi", "-i", "aevalsrc='0.99*sgn(sin(2*PI*1000*t))|0.99*sgn(sin(2*PI*1000*t))':s=44100:d=4",
+           str(path))
+    output_path, before, after = normalize_file(path, target_lufs=-14)
+    assert before["integrated_lufs"] > -2
+    assert after["integrated_lufs"] < -10
+
+
 def test_compare_same_file_is_a_tie(folder):
     result = compare_files(folder / "real.flac", folder / "real.flac")
     assert result["winner"] is None

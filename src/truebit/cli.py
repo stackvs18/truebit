@@ -19,7 +19,7 @@ from rich.text import Text
 from truebit import __version__
 from truebit.probe import AudioError
 from truebit.report import analyze_file, find_audio_files, save_report, save_spectrogram
-from truebit.ui import (CLAUDE_ORANGE, DIM, GREEN, RED, YELLOW, console, format_size,
+from truebit.ui import (BLUE, DIM, GREEN, RED, YELLOW, console, format_size,
                         indented, run_with_spinner, tool_call, tool_result, welcome)
 
 app = typer.Typer(help="TrueBit: catch fake lossless and fake 320 kbps audio.",
@@ -28,11 +28,14 @@ app = typer.Typer(help="TrueBit: catch fake lossless and fake 320 kbps audio.",
 VERDICT_COLORS = {"lossless": GREEN, "lossy": YELLOW, "fake_lossless": RED, "fake_bitrate": RED}
 
 
-# `truebit` on its own shows the welcome box
+# `truebit` on its own opens TrueBit's interactive mode (like `claude` opens Claude Code)
 @app.callback()
 def main(context: typer.Context):
     if context.invoked_subcommand is None:
+        from truebit.shell import start_shell
+
         welcome(__version__, Path.cwd())
+        start_shell()
 
 
 # Stops with a red message (used when a file can't be read)
@@ -46,12 +49,12 @@ def bands_chart(spectrum):
     chart = Text()
     for band in spectrum["bands"]:
         level = band["level_db"]
-        chart.append(f"     {band['from_hz'] / 1000:>4.1f}–{band['to_hz'] / 1000:<4.1f} kHz  ", style=DIM)
+        chart.append(f"   {band['from_hz'] / 1000:>4.1f}–{band['to_hz'] / 1000:<4.1f} kHz  ", style=DIM)
         if level <= -200:
             chart.append("silent", style=RED)
         else:
             bar_length = max(0, int((level + 120) / 2.5))  # -120 dB = empty, -20 dB = full
-            chart.append("█" * bar_length, style=CLAUDE_ORANGE)
+            chart.append("█" * bar_length, style=BLUE)
             chart.append(f" {level:.0f} dB", style=DIM)
         if spectrum["cutoff_hz"] and band["from_hz"] <= spectrum["cutoff_hz"] < band["to_hz"]:
             chart.append("  ← cliff", style="bold " + RED)
@@ -85,14 +88,14 @@ def print_report(report):
         ("Clipping", f"{loudness['clipped_samples']} clipped samples · crest {loudness['crest_factor_db']} dB"),
     ]
     for label, value in rows:
-        console.print(Text(f"     {label:<12} ", style=DIM) + Text(value))
+        console.print(Text(f"   {label:<12} ", style=DIM) + Text(value))
     console.print()
     console.print(bands_chart(spectrum), end="")
 
 
 @app.command()
 def check(file: Path = typer.Argument(..., exists=True, dir_okay=False, help="Audio file to analyse."),
-          spectrogram: bool = typer.Option(True, help="Also save a spectrogram PNG.")):
+          save: bool = typer.Option(False, "--save", help="Save a JSON report and a spectrogram to ./truebit-reports.")):
     """Is this file really what it claims to be?"""
     tool_call("Check", file.name)
     try:
@@ -101,13 +104,12 @@ def check(file: Path = typer.Argument(..., exists=True, dir_okay=False, help="Au
         fail(str(error))
 
     print_report(report)
-    json_path = save_report(report, file)
-    console.print()
-    tool_call("Write", str(json_path))
-    if spectrogram:
+    if save:
+        console.print()
+        tool_call("Saved", str(save_report(report, file)))
         image_path = save_spectrogram(file)
         if image_path is not None:
-            tool_call("Write", str(image_path))
+            tool_call("Saved", str(image_path))
 
 
 # Analyses every file in a list, one by one (run inside the spinner)
@@ -158,6 +160,15 @@ def scan(folder: Path = typer.Argument(..., exists=True, file_okay=False, help="
         tool_call("Write", str(json_out))
 
 
+# Shows a number nicely: whole numbers with commas (1,626,790), others with one decimal (-27.9)
+def nice_number(value, with_sign=False):
+    if float(value).is_integer():
+        text = f"{int(value):+,}" if with_sign else f"{int(value):,}"
+    else:
+        text = f"{value:+.1f}" if with_sign else f"{value:.1f}"
+    return text
+
+
 # One row of a before/after table, green when the number improved
 def add_change_row(table, label, before_value, after_value, unit, lower_is_better=True):
     if before_value is None or after_value is None:
@@ -165,8 +176,9 @@ def add_change_row(table, label, before_value, after_value, unit, lower_is_bette
         return
     improved = after_value < before_value if lower_is_better else after_value > before_value
     color = GREEN if improved else DIM
-    table.add_row(label, f"{before_value:g}{unit}", f"[{color}]{after_value:g}{unit}[/]",
-                  f"[{color}]{after_value - before_value:+.1f}{unit}[/]")
+    change = round(after_value - before_value, 1)
+    table.add_row(label, nice_number(before_value) + unit, f"[{color}]{nice_number(after_value)}{unit}[/]",
+                  f"[{color}]{nice_number(change, with_sign=True)}{unit}[/]")
 
 
 # An empty before/after table
