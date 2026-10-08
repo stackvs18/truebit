@@ -1,13 +1,16 @@
 # TrueBit
 
-**Catch fake lossless and fake 320 kbps audio from your terminal.**
+**Catch fake lossless and fake 320 kbps audio, then repair and normalize what you keep. From your terminal.**
 
 A file sold or shared as "FLAC" or "320 kbps" is often just a 128 kbps MP3 converted upwards. TrueBit finds the fingerprint every MP3/AAC encoder leaves, a sharp **frequency cliff**, and tells you what the file really is.
 
 ```powershell
 irm https://raw.githubusercontent.com/stackvs18/truebit/main/install.ps1 | iex
-truebit check "song.flac"
+truebit check "song.flac"                 # real or fake?
 truebit scan "D:\Music" --json report.json
+truebit compare "a.flac" "b.mp3"          # which copy is genuinely better?
+truebit repair "old_recording.wav"        # fix clipping, clicks and hiss
+truebit normalize "song.flac"             # -14 LUFS, like Spotify
 ```
 
 ![truebit check](docs/check.png)
@@ -51,10 +54,33 @@ truebit check fake.flac          # FAKE LOSSLESS: upscaled from ~128 kbps
 | `truebit check FILE --no-spectrogram` | Same, without the picture |
 | `truebit scan FOLDER` | Table of every audio file in a folder (and sub-folders) |
 | `truebit scan FOLDER --json report.json` | Also saves all reports |
+| `truebit compare A B` | Which of two copies of a song is genuinely better (by real cutoff, not the label) |
+| `truebit repair FILE` | Rebuilds clipped peaks, removes clicks, reduces hiss; shows before/after numbers |
+| `truebit repair FILE --strength strong --no-declick` | Choose how hard to denoise and which steps to run |
+| `truebit normalize FILE` | Sets loudness to -14 LUFS (Spotify/YouTube); `--preset apple` (-16), `broadcast` (-23), or `--target -12` |
+| `truebit serve` | Web API and upload page |
 
 Supported: FLAC, WAV, MP3, M4A/AAC, OGG, Opus, ALAC, AIFF, WMA (anything FFmpeg reads).
 
 ---
+
+## Repair, normalize and compare
+
+**`repair`** chains FFmpeg's restoration filters:
+`adeclick` (fills in short spikes) → `adeclip` (rebuilds the tops of clipped waves) →
+`afftdn` (turns down steady hiss; TrueBit measures the noise floor first and tells the filter
+where the hiss sits) → `alimiter` (so repaired peaks don't clip again).
+On a test file: **75,482 clipped samples → 0, background noise −35.3 → −49.7 dB** (strong).
+It fixes damage. It cannot bring back frequencies an MP3 encoder deleted, and it says so.
+
+**`normalize`** runs EBU R128 `loudnorm` in two passes: measure first, then one exact gain change
+(`linear=true` keeps the dynamics). On a test file: −48.75 → −14.0 LUFS with true peak at −0.9 dBTP.
+
+**`compare`** ranks by what's really in the files: genuine lossless first, then the higher real
+cutoff, then fewer clipped samples. A "FLAC" at 1131 kbps loses to a real FLAC at 890 kbps.
+
+Outputs are saved next to the input (`song.repaired.flac`, `song.normalized-14.flac`). Lossy inputs
+are saved as FLAC, so the fix adds no further loss.
 
 ## Web API
 
@@ -85,7 +111,11 @@ src/truebit/
   cli.py        typer + rich: spinner words, verdict panel, band chart, scan table
   api.py        FastAPI: upload page, /analyze, /health
   quota.py      5 analyses per IP per day (SQLite)
-tests/          real test audio made with FFmpeg: verdicts, API, quota, size limit (14 tests)
+  repair.py     declick, declip, denoise, limiter
+  normalize.py  two-pass EBU R128 loudness normalization
+  compare.py    which copy is genuinely better
+  output.py     shared: output file names, running FFmpeg filters
+tests/          real test audio made with FFmpeg: verdicts, tools, API, quota (20 tests)
 Dockerfile      Python + FFmpeg image for hosting the API
 install.ps1     one-line Windows installer (FFmpeg + uv + TrueBit)
 ```
