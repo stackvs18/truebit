@@ -1,0 +1,261 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>TrueBit · Is your FLAC really lossless?</title>
+  <link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600&family=Geist+Mono&display=swap" rel="stylesheet">
+  <style>
+    :root { --page: #f5f5f7; --text: #1d1d1f; --muted: rgba(0,0,0,.56); --line: rgba(0,0,0,.08); }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--page); color: var(--text); font-family: "Geist", -apple-system, sans-serif; letter-spacing: -0.01em; }
+    main { max-width: 720px; margin: 0 auto; padding: 80px 24px; text-align: center; }
+    h1 { font-size: 52px; letter-spacing: -0.05em; line-height: 1.02; margin: 0 0 14px; font-weight: 600; }
+    p.sub { color: var(--muted); font-size: 17px; margin: 0 0 36px; }
+    .drop { display: block; background: #fff; border: 1.5px dashed rgba(0,0,0,.18); border-radius: 22px; padding: 44px 24px; cursor: pointer; transition: border-color .2s; }
+    .drop:hover, .drop.over { border-color: #1d1d1f; }
+    .drop strong { display: block; font-size: 17px; margin-bottom: 6px; }
+    .drop span { color: var(--muted); font-size: 14px; }
+    .result { text-align: left; background: #fff; border: 1px solid var(--line); border-radius: 22px; padding: 24px; margin-top: 20px; }
+    .verdict { font-size: 22px; font-weight: 600; letter-spacing: -0.03em; margin: 0 0 8px; }
+    .fake { color: #d93025; } .real { color: #14a800; } .lossy { color: #b26a00; }
+    .detail { color: var(--muted); margin: 0 0 16px; }
+    table { width: 100%; border-collapse: collapse; font-size: 14px; }
+    td { padding: 7px 0; border-top: 1px solid var(--line); }
+    td:first-child { color: var(--muted); width: 38%; }
+    img { width: 100%; border-radius: 12px; margin-top: 16px; }
+    .note { color: var(--muted); font-size: 13px; margin-top: 18px; }
+
+    /* The one-line terminal install, with a Copy button */
+    .install { margin-top: 44px; text-align: left; }
+    .install .label { display: block; color: var(--muted); font-size: 13px; margin-bottom: 8px; }
+    .install .command { display: flex; align-items: center; gap: 12px; background: #1d1d1f; color: #f5f5f7;
+                        border-radius: 14px; padding: 14px 14px 14px 18px; }
+    .install code { flex: 1; min-width: 0; font-family: "Geist Mono", ui-monospace, monospace; font-size: 13px;
+                    overflow-x: auto; white-space: nowrap; }
+    .install code .prompt { color: #0A84FF; }
+    .install button { font: inherit; font-size: 13px; border: 0; border-radius: 9px; padding: 7px 12px;
+                      background: #0A84FF; color: #fff; cursor: pointer; }
+
+    /* The "thinking" line: bouncing equalizer bars, a shimmering verb, a timer (macOS blue) */
+    .thinking { font-family: "Geist Mono", ui-monospace, monospace; font-size: 15px; color: #0A84FF; }
+    .thinking .star { display: inline-block; width: 3.2em; letter-spacing: 1px; }
+    .thinking .verb {
+      background: linear-gradient(90deg, #0A84FF 0%, #0A84FF 40%, #64D2FF 50%, #0A84FF 60%, #0A84FF 100%);
+      background-size: 300% 100%; -webkit-background-clip: text; background-clip: text; color: transparent;
+      animation: shimmer 1.6s linear infinite;
+    }
+    .thinking .meta { color: #8a8a8a; }
+    /* Phones: smaller heading, less padding */
+    @media (max-width: 520px) {
+      main { padding: 48px 16px; }
+      h1 { font-size: 38px; }
+    }
+    @keyframes shimmer { from { background-position: 100% 0; } to { background-position: 0% 0; } }
+  </style>
+</head>
+<body>
+<main>
+  <h1>Is your FLAC<br>really lossless?</h1>
+  <p class="sub">Drop an audio file. TrueBit finds the frequency cliff that MP3 encoders leave behind.</p>
+
+  <label class="drop" id="drop">
+    <strong>Choose or drop an audio file</strong>
+    <span>FLAC, WAV, AIFF, ALAC, MP3, M4A, AAC, OGG, Opus, WMA… · up to 50 MB · 5 checks per day · files are deleted right after</span>
+    <input type="file" id="file" accept="audio/*,.flac,.wav,.aiff,.aif,.ape,.wv,.mp3,.m4a,.m4b,.aac,.ogg,.oga,.opus,.wma,.ac3,.mka,.webm" hidden>
+  </label>
+
+  <div id="result"></div>
+  <div class="install">
+    <span class="label">Or get the terminal app (Windows PowerShell): scan a whole library, repair, normalize, compare</span>
+    <div class="command">
+      <code><span class="prompt">&gt;</span> <span id="install-command">irm https://raw.githubusercontent.com/stackvs18/truebit/main/install.ps1 | iex</span></code>
+      <button type="button" id="copy-install">Copy</button>
+    </div>
+  </div>
+</main>
+
+<script>
+  var drop = document.getElementById("drop");
+  var fileInput = document.getElementById("file");
+  var resultBox = document.getElementById("result");
+
+  // The install command uses this site's own short link, e.g. irm https://truebit.onrender.com/install.ps1 | iex
+  var installCommand = document.getElementById("install-command");
+  if (location.protocol === "https:") {
+    installCommand.textContent = "irm " + location.origin + "/install.ps1 | iex";
+  }
+  document.getElementById("copy-install").addEventListener("click", function () {
+    var button = this;
+    navigator.clipboard.writeText(installCommand.textContent).then(function () {
+      button.textContent = "Copied";
+      setTimeout(function () { button.textContent = "Copy"; }, 1500);
+    });
+  });
+
+  // Puts text into HTML safely
+  function escapeText(text) {
+    var element = document.createElement("div");
+    element.textContent = String(text);
+    return element.innerHTML;
+  }
+
+  // ---- The animated "thinking" line: equalizer bars, shimmering verb, timer ----------
+  var BAR_LEVELS = "▁▂▃▄▅▆▇█";
+
+  // Four equalizer bars, each bouncing on its own wave, like audio levels
+  function equalizerFrame(seconds) {
+    var bars = "";
+    for (var barNumber = 0; barNumber < 4; barNumber = barNumber + 1) {
+      var wave = Math.sin(seconds * 9 + barNumber * 1.7) * 0.5 + Math.sin(seconds * 5.3 + barNumber) * 0.5;
+      var height = Math.floor((wave + 1) / 2 * (BAR_LEVELS.length - 1));
+      bars = bars + BAR_LEVELS.charAt(height);
+    }
+    return bars;
+  }
+  var VERBS = ["Pollinating", "Sniffing for brickwalls", "Interrogating the Nyquist",
+    "Untangling waveforms", "Counting lost harmonics", "Bribing the FFT", "Squinting at 16 kHz",
+    "Listening very carefully", "Chasing the cliff", "Welching the spectrum", "Herding decibels"];
+  var thinkingTimer = null;
+
+  // "8s", "1m 05s"
+  function formatElapsed(seconds) {
+    if (seconds < 60) { return seconds + "s"; }
+    var rest = seconds % 60;
+    return Math.floor(seconds / 60) + "m " + (rest < 10 ? "0" : "") + rest + "s";
+  }
+
+  // Starts the animation. getDetail() returns the text after the timer (e.g. "uploading 45%").
+  function startThinking(getDetail) {
+    stopThinking();
+    var startedAt = Date.now();
+    var verb = VERBS[Math.floor(Math.random() * VERBS.length)];
+    var verbChangedAt = startedAt;
+    resultBox.innerHTML = '<div class="result thinking"><span class="star"></span>'
+      + '<span class="verb"></span><span class="meta"></span></div>';
+    var starElement = resultBox.querySelector(".star");
+    var verbElement = resultBox.querySelector(".verb");
+    var metaElement = resultBox.querySelector(".meta");
+
+    thinkingTimer = setInterval(function () {
+      var now = Date.now();
+      // A new verb every 2 seconds (never the same one twice in a row)
+      if (now - verbChangedAt >= 2000) {
+        var nextVerb = verb;
+        while (nextVerb === verb) { nextVerb = VERBS[Math.floor(Math.random() * VERBS.length)]; }
+        verb = nextVerb;
+        verbChangedAt = now;
+      }
+      starElement.textContent = equalizerFrame((now - startedAt) / 1000);
+      verbElement.textContent = verb + "…";
+      metaElement.textContent = " (" + formatElapsed(Math.floor((now - startedAt) / 1000)) + " · " + getDetail() + ")";
+    }, 80);
+  }
+
+  function stopThinking() {
+    if (thinkingTimer !== null) { clearInterval(thinkingTimer); thinkingTimer = null; }
+  }
+
+  // "4.2 MB"
+  function formatSize(bytes) {
+    if (bytes < 1024 * 1024) { return Math.round(bytes / 1024) + " KB"; }
+    return (bytes / 1024 / 1024).toFixed(1) + " MB";
+  }
+
+  // Sends the file to /analyze and shows the answer.
+  // XMLHttpRequest (not fetch) because it can report upload progress.
+  function analyze(file) {
+    var detailText = "uploading 0%";
+    startThinking(function () { return detailText; });
+
+    var formData = new FormData();
+    formData.append("file", file);
+    var request = new XMLHttpRequest();
+    request.open("POST", "/analyze?spectrogram=true");
+
+    request.upload.onprogress = function (event) {
+      if (event.lengthComputable) {
+        detailText = "uploading " + Math.round(event.loaded / event.total * 100) + "%";
+      }
+    };
+    request.upload.onload = function () {
+      detailText = formatSize(file.size) + " · analysing";
+    };
+    request.onerror = function () {
+      stopThinking();
+      resultBox.innerHTML = '<div class="result">Something went wrong. Try again.</div>';
+    };
+    request.onload = function () {
+      stopThinking();
+      var data = {};
+      try { data = JSON.parse(request.responseText); } catch (error) { data = { error: "Unexpected answer" }; }
+      showAnswer({ ok: request.status === 200, data: data });
+    };
+    request.send(formData);
+  }
+
+  // Shows the report (or the error) after the analysis
+  function showAnswer(answer) {
+    if (!answer.ok) {
+      resultBox.innerHTML = '<div class="result">' + escapeText(answer.data.detail || answer.data.error) + "</div>";
+      return;
+    }
+    var report = answer.data;
+    var colour = "lossy";
+    if (report.verdict.indexOf("fake") === 0) { colour = "fake"; }
+    if (report.verdict === "lossless") { colour = "real"; }
+    var cutoff = "none (full band)";
+    if (report.spectrum.cutoff_hz) { cutoff = (report.spectrum.cutoff_hz / 1000).toFixed(2) + " kHz"; }
+
+    // The three bitrates: what the properties say, what's stored, what the sound is really worth
+    var bitrate = report.bitrate;
+    var says = bitrate.label_kbps ? bitrate.label_kbps + " kbps" : "not given";
+    if (bitrate.mode) { says = says + " (" + bitrate.mode + ")"; }
+    var stores = bitrate.stored_kbps ? bitrate.stored_kbps + " kbps (file size ÷ length)" : "?";
+    var really = bitrate.real_text;
+    if (bitrate.inflated_times && bitrate.inflated_times >= 1.4) {
+      really = really + " (the label is " + bitrate.inflated_times + "× too high)";
+    }
+
+    // Title · Artist · Album, if the file has tags
+    var tagParts = [];
+    var tagNames = ["title", "artist", "album"];
+    for (var i = 0; i < tagNames.length; i++) {
+      if (report.file.tags[tagNames[i]]) { tagParts.push(report.file.tags[tagNames[i]]); }
+    }
+    if (report.file.has_cover_art) { tagParts.push("cover art"); }
+
+    var html = '<div class="result">'
+      + '<p class="verdict ' + colour + '">' + escapeText(report.verdict_headline) + "</p>"
+      + '<p class="detail">' + escapeText(report.verdict_detail) + "</p><table>"
+      + "<tr><td>Lossless?</td><td>" + escapeText(report.lossless.answer) + "</td></tr>"
+      + "<tr><td>Bitrate says</td><td>" + escapeText(says) + "</td></tr>"
+      + "<tr><td>Actually stores</td><td>" + escapeText(stores) + "</td></tr>"
+      + "<tr><td>Really worth</td><td>" + escapeText(really) + "</td></tr>"
+      + "<tr><td>Format</td><td>" + escapeText(report.file.codec_name + (report.file.encoder ? " · " + report.file.encoder : "")) + "</td></tr>"
+      + "<tr><td>Audio</td><td>" + escapeText(report.file.sample_rate_hz + " Hz · " + (report.file.channel_layout || report.file.channels + " ch") + (report.file.bit_depth ? " · " + report.file.bit_depth + "-bit" : "")) + "</td></tr>"
+      + "<tr><td>Size</td><td>" + escapeText(formatSize(report.file.file_size_bytes) + " · " + Math.round(report.file.duration_seconds) + " s") + "</td></tr>"
+      + "<tr><td>Tags</td><td>" + escapeText(tagParts.length > 0 ? tagParts.join(" · ") : "none") + "</td></tr>"
+      + "<tr><td>Cutoff</td><td>" + escapeText(cutoff) + "</td></tr>"
+      + "<tr><td>Loudness</td><td>" + escapeText(report.loudness.integrated_lufs + " LUFS · true peak " + report.loudness.true_peak_dbtp + " dBTP") + "</td></tr>"
+      + "<tr><td>Clean?</td><td>" + escapeText(report.loudness.clipped_samples + " clipped samples · noise floor " + report.loudness.noise_floor_dbfs + " dB") + "</td></tr>"
+      + "</table>";
+    if (report.spectrogram_png_base64) {
+      html = html + '<img alt="Spectrogram" src="data:image/png;base64,' + report.spectrogram_png_base64 + '">';
+    }
+    resultBox.innerHTML = html + "</div>";
+  }
+
+  fileInput.addEventListener("change", function () {
+    if (fileInput.files.length > 0) { analyze(fileInput.files[0]); }
+  });
+  drop.addEventListener("dragover", function (event) { event.preventDefault(); drop.classList.add("over"); });
+  drop.addEventListener("dragleave", function () { drop.classList.remove("over"); });
+  drop.addEventListener("drop", function (event) {
+    event.preventDefault();
+    drop.classList.remove("over");
+    if (event.dataTransfer.files.length > 0) { analyze(event.dataTransfer.files[0]); }
+  });
+</script>
+</body>
+</html>
