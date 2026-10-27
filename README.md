@@ -2,6 +2,8 @@
 
 **Is your FLAC really lossless?** TrueBit checks any audio file (FLAC, WAV, AIFF, ALAC, MP3, M4A/AAC, OGG, Opus, WMA…) for what's really inside: whether it's **truly lossless**, the bitrate its **properties say** versus what it **really holds**, plus tags, cover art, encoder and loudness, and lets you **change the tags for good** without touching the sound. It catches fake lossless and fake 320 kbps audio by the frequency "cliff" every encoder leaves behind, then **fixes** problem files: noisy, clipped and fake upscaled audio comes out clean, honest and evenly loud. It's an interactive terminal app, and also a web API.
 
+**Try it in the browser:** [truebit.onrender.com](https://truebit.onrender.com) (free plan: the first visit may take about a minute to wake up)
+
 ```powershell
 irm https://raw.githubusercontent.com/stackvs18/truebit/main/install.ps1 | iex
 ```
@@ -43,7 +45,7 @@ flowchart LR
 - It installs FFmpeg (with winget) and [uv](https://docs.astral.sh/uv/) if you don't have them, then TrueBit itself, in its own isolated folder with its own Python.
 - **Running it again updates TrueBit.** Remove it with `uv tool uninstall truebit`.
 - It runs inside a function, so it leaves your PowerShell session as it found it. As with any `irm | iex`, [read the script](install.ps1) first.
-- Once the web app is hosted, its short link does the same: `irm https://<your-site>/install.ps1 | iex`.
+- The web app's short link does the same: `irm https://truebit.onrender.com/install.ps1 | iex`.
 - macOS / Linux: install FFmpeg and uv, then `uv tool install git+https://github.com/stackvs18/truebit`.
 
 ---
@@ -420,7 +422,7 @@ truebit serve          # http://127.0.0.1:8000  ·  API docs at /docs
 | GET | `/` | Drag-and-drop upload page, with the one-line install command and a Copy button |
 | POST | `/analyze` | Upload a file (max 50 MB), get the full JSON report; `?spectrogram=true` adds the picture as base64 |
 | GET | `/health` | `{"status": "ok", "version": "0.2.0"}` |
-| GET | `/install.ps1` | The short install link: redirects to [`install.ps1`](install.ps1) on GitHub, so `irm https://<your-site>/install.ps1 \| iex` works |
+| GET | `/install.ps1` | The short install link: redirects to [`install.ps1`](install.ps1) on GitHub, so `irm https://truebit.onrender.com/install.ps1 \| iex` works |
 
 ```mermaid
 sequenceDiagram
