@@ -57,7 +57,7 @@ Type `truebit` and it opens like an app: the TRUEBIT logo, then a `truebit ›` 
 ```
   ▀█▀ █▀█ █ █ █▀▀ █▄▄ █ ▀█▀
    █  █▀▄ █▄█ ██▄ █▄█ █  █
-  v0.2.0 · is your FLAC really lossless?
+  v0.1.0 · is your FLAC really lossless?
 
 truebit › check fake_320.mp3
 ◆ Check  fake_320.mp3
@@ -421,7 +421,7 @@ truebit serve          # http://127.0.0.1:8000  ·  API docs at /docs
 |---|---|---|
 | GET | `/` | Drag-and-drop upload page, with the one-line install command and a Copy button |
 | POST | `/analyze` | Upload a file (max 50 MB), get the full JSON report; `?spectrogram=true` adds the picture as base64 |
-| GET | `/health` | `{"status": "ok", "version": "0.2.0"}` |
+| GET | `/health` | `{"status": "ok", "version": "0.1.0"}` |
 | GET | `/install.ps1` | The short install link: redirects to [`install.ps1`](install.ps1) on GitHub, so `irm https://truebit.onrender.com/install.ps1 \| iex` works |
 
 ```mermaid
